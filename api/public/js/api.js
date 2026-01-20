@@ -143,8 +143,12 @@ class ApiClient {
   }
 
   // Screenshots endpoints
-  async getScreenshots(pageId, limit = 50, offset = 0) {
-    return this.request(`/pages/${pageId}/screenshots?limit=${limit}&offset=${offset}`);
+  async getScreenshots(pageId, { limit = 50, offset = 0, viewport = null } = {}) {
+    let url = `/pages/${pageId}/screenshots?limit=${limit}&offset=${offset}`;
+    if (viewport) {
+      url += `&viewport=${encodeURIComponent(viewport)}`;
+    }
+    return this.request(url);
   }
 
   async getScreenshot(id) {

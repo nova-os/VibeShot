@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE TABLE IF NOT EXISTS screenshots (
     id INT AUTO_INCREMENT PRIMARY KEY,
     page_id INT NOT NULL,
+    viewport VARCHAR(20) NOT NULL DEFAULT 'desktop',
+    viewport_width INT NOT NULL DEFAULT 1920,
     file_path VARCHAR(512) NOT NULL,
     thumbnail_path VARCHAR(512),
     file_size INT,
@@ -48,5 +50,6 @@ CREATE TABLE IF NOT EXISTS screenshots (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
     INDEX idx_page_id (page_id),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_viewport (viewport)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

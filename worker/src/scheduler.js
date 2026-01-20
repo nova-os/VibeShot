@@ -1,5 +1,5 @@
 const db = require('./config/database');
-const { captureScreenshot } = require('./screenshot');
+const { captureScreenshots } = require('./screenshot');
 
 const POLL_INTERVAL = 60000; // 60 seconds
 
@@ -84,11 +84,13 @@ class Scheduler {
       const browser = await this.browserPool.acquire();
       
       try {
-        // Capture screenshot
-        const result = await captureScreenshot(browser, page);
+        // Capture screenshots for all viewports
+        const results = await captureScreenshots(browser, page);
         
-        // Save to database
-        await this.saveScreenshot(page.id, result);
+        // Save all screenshots to database
+        for (const result of results) {
+          await this.saveScreenshot(page.id, result);
+        }
         
         // Update last_screenshot_at
         await db.query(
@@ -96,7 +98,7 @@ class Scheduler {
           [page.id]
         );
 
-        console.log(`Scheduler: Successfully captured page ${page.id}`);
+        console.log(`Scheduler: Successfully captured ${results.length} viewports for page ${page.id}`);
         
       } finally {
         // Always release browser back to pool
@@ -113,9 +115,9 @@ class Scheduler {
 
   async saveScreenshot(pageId, result) {
     await db.query(
-      `INSERT INTO screenshots (page_id, file_path, thumbnail_path, file_size, width, height)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [pageId, result.filePath, result.thumbnailPath, result.fileSize, result.width, result.height]
+      `INSERT INTO screenshots (page_id, viewport, viewport_width, file_path, thumbnail_path, file_size, width, height)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [pageId, result.viewport, result.viewportWidth, result.filePath, result.thumbnailPath, result.fileSize, result.width, result.height]
     );
   }
 }

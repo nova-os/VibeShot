@@ -7,9 +7,11 @@ A web application for automated website screenshot monitoring. Track visual chan
 - **Multi-user authentication** - Secure JWT-based login system
 - **Site management** - Organize monitored pages by domain/site
 - **Configurable intervals** - Set custom capture intervals per page
+- **Multi-viewport screenshots** - Captures mobile, tablet, and desktop views
 - **Full-page screenshots** - Captures entire page using Puppeteer
 - **Thumbnail generation** - Quick preview thumbnails for the gallery
 - **Screenshot timeline** - Browse historical screenshots with viewer
+- **Viewport filtering** - Filter screenshots by device type
 - **Background worker** - Independent screenshot capture process
 - **Browser pool** - 4 parallel Puppeteer instances for efficiency
 
@@ -61,10 +63,34 @@ A web application for automated website screenshot monitoring. Track visual chan
 
 4. Start the application:
    ```bash
-   docker-compose up -d
+   ./scripts/start.sh
    ```
 
-5. Open http://localhost:3000 in your browser
+5. (Optional) Seed with test data:
+   ```bash
+   ./scripts/seed.sh
+   ```
+
+6. Open http://localhost:3000 in your browser
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `./scripts/start.sh` | Start all services |
+| `./scripts/stop.sh` | Stop all services |
+| `./scripts/logs.sh [service]` | View logs (api, worker, mysql) |
+| `./scripts/reset.sh` | Reset all data (database + screenshots) |
+| `./scripts/reset.sh --seed` | Reset and seed with test data |
+| `./scripts/seed.sh` | Seed database with test data |
+| `./scripts/install.sh` | Reinstall dependencies |
+
+### Test Account (after seeding)
+
+- **Email:** test@example.com
+- **Password:** password123
+
+The seed script creates a test site (heise.de) with two pages for testing.
 
 ## Configuration
 
@@ -78,6 +104,9 @@ A web application for automated website screenshot monitoring. Track visual chan
 | `MYSQL_PASSWORD` | Database password | - |
 | `JWT_SECRET` | Secret for JWT tokens | - |
 | `BROWSER_POOL_SIZE` | Number of parallel browsers | 4 |
+| `VIEWPORT_MOBILE` | Mobile viewport width | 375 |
+| `VIEWPORT_TABLET` | Tablet viewport width | 768 |
+| `VIEWPORT_DESKTOP` | Desktop viewport width | 1920 |
 
 ### Screenshot Intervals
 

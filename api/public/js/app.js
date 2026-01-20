@@ -2,6 +2,19 @@
 
 let currentSite = null;
 let currentPage = null;
+let currentViewportFilter = null; // null means "all"
+
+const VIEWPORT_LABELS = {
+  mobile: '📱 Mobile',
+  tablet: '📱 Tablet',
+  desktop: '🖥️ Desktop'
+};
+
+const VIEWPORT_ICONS = {
+  mobile: '📱',
+  tablet: '📱',
+  desktop: '🖥️'
+};
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -153,14 +166,44 @@ async function showScreenshots(pageId) {
   try {
     const page = await api.getPage(pageId);
     currentPage = page;
+    currentViewportFilter = null; // Reset filter when switching pages
 
     document.getElementById('page-name').textContent = page.name;
     document.getElementById('page-url').textContent = page.url;
 
+    // Render viewport filter tabs
+    renderViewportTabs();
+    
     loadScreenshots(pageId);
   } catch (error) {
     showToast('Failed to load page: ' + error.message, 'error');
   }
+}
+
+function renderViewportTabs() {
+  const container = document.getElementById('viewport-tabs');
+  if (!container) return;
+
+  container.innerHTML = `
+    <button class="viewport-tab ${currentViewportFilter === null ? 'active' : ''}" onclick="filterByViewport(null)">
+      All
+    </button>
+    <button class="viewport-tab ${currentViewportFilter === 'desktop' ? 'active' : ''}" onclick="filterByViewport('desktop')">
+      🖥️ Desktop
+    </button>
+    <button class="viewport-tab ${currentViewportFilter === 'tablet' ? 'active' : ''}" onclick="filterByViewport('tablet')">
+      📱 Tablet
+    </button>
+    <button class="viewport-tab ${currentViewportFilter === 'mobile' ? 'active' : ''}" onclick="filterByViewport('mobile')">
+      📱 Mobile
+    </button>
+  `;
+}
+
+function filterByViewport(viewport) {
+  currentViewportFilter = viewport;
+  renderViewportTabs();
+  loadScreenshots(currentPage.id);
 }
 
 async function loadScreenshots(pageId) {
@@ -168,7 +211,9 @@ async function loadScreenshots(pageId) {
   timeline.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
   try {
-    const result = await api.getScreenshots(pageId);
+    const result = await api.getScreenshots(pageId, { 
+      viewport: currentViewportFilter 
+    });
     const screenshots = result.screenshots;
 
     if (screenshots.length === 0) {
@@ -181,22 +226,88 @@ async function loadScreenshots(pageId) {
       return;
     }
 
-    timeline.innerHTML = screenshots.map(screenshot => `
-      <div class="screenshot-card" onclick="viewScreenshot(${screenshot.id})">
-        <div class="screenshot-thumb">
-          <img src="${api.getScreenshotThumbnailUrl(screenshot.id)}" 
-               alt="Screenshot" 
-               onerror="this.parentElement.innerHTML='<span class=\\'placeholder\\'>📷</span>'">
-        </div>
-        <div class="screenshot-info">
-          <div class="screenshot-date">${formatDateTime(screenshot.created_at)}</div>
-          <div class="screenshot-meta">${screenshot.width}×${screenshot.height} · ${formatFileSize(screenshot.file_size)}</div>
-        </div>
-      </div>
-    `).join('');
+    // Group screenshots by timestamp (same capture session)
+    const grouped = groupScreenshotsByTimestamp(screenshots);
+    
+    if (currentViewportFilter) {
+      // Single viewport view - show as grid
+      timeline.innerHTML = screenshots.map(screenshot => renderScreenshotCard(screenshot)).join('');
+    } else {
+      // All viewports view - group by capture time
+      timeline.innerHTML = grouped.map(group => renderScreenshotGroup(group)).join('');
+    }
   } catch (error) {
     timeline.innerHTML = `<p class="text-muted">Failed to load screenshots: ${error.message}</p>`;
   }
+}
+
+function groupScreenshotsByTimestamp(screenshots) {
+  const groups = {};
+  
+  screenshots.forEach(screenshot => {
+    // Group by created_at minute (screenshots in same capture should have same minute)
+    const date = new Date(screenshot.created_at);
+    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}-${date.getMinutes()}`;
+    
+    if (!groups[key]) {
+      groups[key] = {
+        timestamp: screenshot.created_at,
+        screenshots: []
+      };
+    }
+    groups[key].screenshots.push(screenshot);
+  });
+  
+  // Sort groups by timestamp (newest first)
+  return Object.values(groups).sort((a, b) => 
+    new Date(b.timestamp) - new Date(a.timestamp)
+  );
+}
+
+function renderScreenshotGroup(group) {
+  // Sort screenshots within group: desktop, tablet, mobile
+  const order = { desktop: 0, tablet: 1, mobile: 2 };
+  group.screenshots.sort((a, b) => 
+    (order[a.viewport] || 99) - (order[b.viewport] || 99)
+  );
+  
+  return `
+    <div class="screenshot-group">
+      <div class="screenshot-group-header">
+        <span class="screenshot-group-date">${formatDateTime(group.timestamp)}</span>
+        <span class="screenshot-group-count">${group.screenshots.length} viewport${group.screenshots.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="screenshot-group-items">
+        ${group.screenshots.map(screenshot => renderScreenshotCard(screenshot, true)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderScreenshotCard(screenshot, showViewport = false) {
+  const viewportBadge = screenshot.viewport ? `
+    <span class="viewport-badge viewport-${screenshot.viewport}">
+      ${VIEWPORT_ICONS[screenshot.viewport] || ''} ${screenshot.viewport}
+    </span>
+  ` : '';
+  
+  return `
+    <div class="screenshot-card" onclick="viewScreenshot(${screenshot.id})">
+      <div class="screenshot-thumb">
+        <img src="${api.getScreenshotThumbnailUrl(screenshot.id)}" 
+             alt="Screenshot" 
+             onerror="this.parentElement.innerHTML='<span class=\\'placeholder\\'>📷</span>'">
+        ${showViewport ? viewportBadge : ''}
+      </div>
+      <div class="screenshot-info">
+        ${!showViewport ? `<div class="screenshot-date">${formatDateTime(screenshot.created_at)}</div>` : ''}
+        <div class="screenshot-meta">
+          ${showViewport ? `<span class="viewport-label">${screenshot.viewport_width || screenshot.width}px</span> · ` : ''}
+          ${screenshot.width}×${screenshot.height} · ${formatFileSize(screenshot.file_size)}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function viewScreenshot(id) {
@@ -210,6 +321,15 @@ async function viewScreenshot(id) {
     document.getElementById('viewer-date').textContent = formatDateTime(screenshot.created_at);
     document.getElementById('viewer-size').textContent = formatFileSize(screenshot.file_size);
     document.getElementById('viewer-dimensions').textContent = `${screenshot.width}×${screenshot.height}`;
+    
+    // Show viewport info
+    const viewportEl = document.getElementById('viewer-viewport');
+    if (viewportEl && screenshot.viewport) {
+      viewportEl.textContent = `${VIEWPORT_ICONS[screenshot.viewport] || ''} ${screenshot.viewport} (${screenshot.viewport_width || screenshot.width}px)`;
+      viewportEl.classList.remove('hidden');
+    } else if (viewportEl) {
+      viewportEl.classList.add('hidden');
+    }
     
     // Show scroll hint for tall images (height > 2x width suggests full page)
     if (screenshot.height > screenshot.width * 2) {
