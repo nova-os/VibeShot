@@ -965,3 +965,256 @@ body {
     transform: translateX(0);
   }
 }
+
+/* ===== COMPARISON FEATURE STYLES ===== */
+
+/* Updated Viewport Tabs for Compare Mode */
+.viewport-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  width: 100%;
+}
+
+.viewport-tabs-left {
+  display: flex;
+  gap: 4px;
+}
+
+.viewport-tabs-right {
+  display: flex;
+  gap: 8px;
+}
+
+/* Compare Mode Checkbox */
+.compare-checkbox-wrapper {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  border-radius: 6px;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+
+.compare-checkbox-wrapper:hover {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+.compare-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.compare-checkbox-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Selected Screenshot Card */
+.screenshot-card.selected-for-compare {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-glow);
+}
+
+.screenshot-card.selected-for-compare .compare-checkbox-wrapper {
+  background: var(--accent-primary);
+}
+
+/* Comparison Viewer */
+.comparison-viewer {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-primary);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.comparison-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.comparison-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comparison-header-info h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.comparison-stats {
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+}
+
+.diff-percentage {
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+.diff-percentage.diff-minimal {
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+}
+
+.diff-percentage.diff-moderate {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
+.diff-percentage.diff-significant {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger);
+}
+
+.diff-pixels {
+  color: var(--text-secondary);
+}
+
+.loading-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.error-text {
+  color: var(--danger);
+}
+
+/* Comparison Content - Three Panel Layout */
+.comparison-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--border-color);
+  overflow: hidden;
+}
+
+.comparison-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.comparison-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.panel-label {
+  font-weight: 600;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.comparison-panel-diff .panel-label {
+  color: #ff0080;
+}
+
+.panel-date {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.panel-hint {
+  font-size: 11px;
+  color: #ff0080;
+  font-style: italic;
+}
+
+.comparison-panel-image {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.comparison-panel-image img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--border-radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive Comparison Viewer */
+@media (max-width: 1200px) {
+  .comparison-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+  }
+  
+  .comparison-panel-image {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .viewport-tabs {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .viewport-tabs-left {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .viewport-tabs-right {
+    justify-content: center;
+  }
+  
+  .comparison-header {
+    padding: 12px 16px;
+  }
+  
+  .comparison-header-info h2 {
+    font-size: 16px;
+  }
+  
+  .comparison-stats {
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+  }
+}

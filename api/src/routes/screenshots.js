@@ -3,6 +3,9 @@ const path = require('path');
 const fs = require('fs').promises;
 const db = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const pixelmatch = require('pixelmatch');
+const { PNG } = require('pngjs');
+const sharp = require('sharp');
 
 const router = express.Router();
 
@@ -93,6 +96,205 @@ router.get('/:id/thumbnail', async (req, res) => {
   } catch (error) {
     console.error('Get thumbnail error:', error);
     res.status(500).json({ error: 'Failed to get thumbnail' });
+  }
+});
+
+// Compare two screenshots and generate diff image
+router.get('/:id/compare/:otherId', async (req, res) => {
+  try {
+    const { id, otherId } = req.params;
+    
+    // Fetch both screenshots, ensuring they belong to the same page and user
+    const [screenshots] = await db.query(
+      `SELECT sc.*, p.id as page_id FROM screenshots sc
+       JOIN pages p ON sc.page_id = p.id
+       JOIN sites s ON p.site_id = s.id
+       WHERE sc.id IN (?, ?) AND s.user_id = ?`,
+      [id, otherId, req.user.id]
+    );
+
+    if (screenshots.length !== 2) {
+      return res.status(404).json({ error: 'One or both screenshots not found' });
+    }
+
+    const screenshot1 = screenshots.find(s => s.id === parseInt(id));
+    const screenshot2 = screenshots.find(s => s.id === parseInt(otherId));
+
+    // Verify both screenshots belong to the same page
+    if (screenshot1.page_id !== screenshot2.page_id) {
+      return res.status(400).json({ error: 'Screenshots must belong to the same page' });
+    }
+
+    // Load both images
+    const filePath1 = path.join(__dirname, '../../screenshots', screenshot1.file_path);
+    const filePath2 = path.join(__dirname, '../../screenshots', screenshot2.file_path);
+
+    try {
+      await fs.access(filePath1);
+      await fs.access(filePath2);
+    } catch {
+      return res.status(404).json({ error: 'Screenshot files not found' });
+    }
+
+    // Read and decode PNG images using sharp for consistent handling
+    // Then convert to raw pixel data for pixelmatch
+    const img1Buffer = await fs.readFile(filePath1);
+    const img2Buffer = await fs.readFile(filePath2);
+
+    // Get image metadata
+    const img1Meta = await sharp(img1Buffer).metadata();
+    const img2Meta = await sharp(img2Buffer).metadata();
+
+    // Determine target dimensions (use the smaller of each dimension)
+    const targetWidth = Math.min(img1Meta.width, img2Meta.width);
+    const targetHeight = Math.min(img1Meta.height, img2Meta.height);
+
+    // Resize images to match dimensions and get raw RGBA pixel data
+    const img1Raw = await sharp(img1Buffer)
+      .resize(targetWidth, targetHeight, { fit: 'cover', position: 'top' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+
+    const img2Raw = await sharp(img2Buffer)
+      .resize(targetWidth, targetHeight, { fit: 'cover', position: 'top' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+
+    // Create output buffer for diff
+    const diffBuffer = Buffer.alloc(targetWidth * targetHeight * 4);
+
+    // Run pixelmatch comparison
+    const numDiffPixels = pixelmatch(
+      img1Raw,
+      img2Raw,
+      diffBuffer,
+      targetWidth,
+      targetHeight,
+      { 
+        threshold: 0.1,
+        includeAA: true,
+        alpha: 0.1,
+        diffColor: [255, 0, 128], // Magenta for differences
+        diffColorAlt: [0, 255, 128] // Cyan for anti-aliased
+      }
+    );
+
+    // Calculate diff percentage
+    const totalPixels = targetWidth * targetHeight;
+    const diffPercentage = ((numDiffPixels / totalPixels) * 100).toFixed(2);
+
+    // Convert raw buffer back to PNG using sharp
+    const diffPng = await sharp(diffBuffer, {
+      raw: {
+        width: targetWidth,
+        height: targetHeight,
+        channels: 4
+      }
+    }).png().toBuffer();
+
+    // Set headers with diff statistics
+    res.set({
+      'Content-Type': 'image/png',
+      'X-Diff-Pixels': numDiffPixels.toString(),
+      'X-Diff-Percentage': diffPercentage,
+      'X-Diff-Width': targetWidth.toString(),
+      'X-Diff-Height': targetHeight.toString(),
+      'Access-Control-Expose-Headers': 'X-Diff-Pixels, X-Diff-Percentage, X-Diff-Width, X-Diff-Height'
+    });
+
+    res.send(diffPng);
+  } catch (error) {
+    console.error('Compare screenshots error:', error);
+    res.status(500).json({ error: 'Failed to compare screenshots' });
+  }
+});
+
+// Get comparison stats without generating full diff image
+router.get('/:id/compare/:otherId/stats', async (req, res) => {
+  try {
+    const { id, otherId } = req.params;
+    
+    // Fetch both screenshots
+    const [screenshots] = await db.query(
+      `SELECT sc.*, p.id as page_id FROM screenshots sc
+       JOIN pages p ON sc.page_id = p.id
+       JOIN sites s ON p.site_id = s.id
+       WHERE sc.id IN (?, ?) AND s.user_id = ?`,
+      [id, otherId, req.user.id]
+    );
+
+    if (screenshots.length !== 2) {
+      return res.status(404).json({ error: 'One or both screenshots not found' });
+    }
+
+    const screenshot1 = screenshots.find(s => s.id === parseInt(id));
+    const screenshot2 = screenshots.find(s => s.id === parseInt(otherId));
+
+    if (screenshot1.page_id !== screenshot2.page_id) {
+      return res.status(400).json({ error: 'Screenshots must belong to the same page' });
+    }
+
+    // Load and compare images
+    const filePath1 = path.join(__dirname, '../../screenshots', screenshot1.file_path);
+    const filePath2 = path.join(__dirname, '../../screenshots', screenshot2.file_path);
+
+    const img1Buffer = await fs.readFile(filePath1);
+    const img2Buffer = await fs.readFile(filePath2);
+
+    const img1Meta = await sharp(img1Buffer).metadata();
+    const img2Meta = await sharp(img2Buffer).metadata();
+
+    const targetWidth = Math.min(img1Meta.width, img2Meta.width);
+    const targetHeight = Math.min(img1Meta.height, img2Meta.height);
+
+    const img1Raw = await sharp(img1Buffer)
+      .resize(targetWidth, targetHeight, { fit: 'cover', position: 'top' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+
+    const img2Raw = await sharp(img2Buffer)
+      .resize(targetWidth, targetHeight, { fit: 'cover', position: 'top' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+
+    const diffBuffer = Buffer.alloc(targetWidth * targetHeight * 4);
+
+    const numDiffPixels = pixelmatch(
+      img1Raw,
+      img2Raw,
+      diffBuffer,
+      targetWidth,
+      targetHeight,
+      { threshold: 0.1, includeAA: true }
+    );
+
+    const totalPixels = targetWidth * targetHeight;
+    const diffPercentage = ((numDiffPixels / totalPixels) * 100).toFixed(2);
+
+    res.json({
+      diffPixels: numDiffPixels,
+      diffPercentage: parseFloat(diffPercentage),
+      totalPixels,
+      width: targetWidth,
+      height: targetHeight,
+      screenshot1: {
+        id: screenshot1.id,
+        created_at: screenshot1.created_at,
+        viewport: screenshot1.viewport
+      },
+      screenshot2: {
+        id: screenshot2.id,
+        created_at: screenshot2.created_at,
+        viewport: screenshot2.viewport
+      }
+    });
+  } catch (error) {
+    console.error('Get comparison stats error:', error);
+    res.status(500).json({ error: 'Failed to get comparison stats' });
   }
 });
 

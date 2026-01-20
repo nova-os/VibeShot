@@ -172,6 +172,48 @@
         ↓ Scroll to see more ↓
       </div>
     </div>
+
+    <!-- Comparison Viewer -->
+    <div id="comparison-viewer" class="comparison-viewer hidden">
+      <div class="comparison-header">
+        <div class="comparison-header-info">
+          <h2>Screenshot Comparison</h2>
+          <div id="comparison-stats" class="comparison-stats">
+            <span class="loading-text">Analyzing changes...</span>
+          </div>
+        </div>
+        <button class="viewer-close" onclick="closeComparisonViewer()">×</button>
+      </div>
+      <div class="comparison-content">
+        <div class="comparison-panel">
+          <div class="comparison-panel-header">
+            <span class="panel-label">Before</span>
+            <span id="comparison-before-date" class="panel-date"></span>
+          </div>
+          <div class="comparison-panel-image">
+            <img id="comparison-before-img" src="" alt="Before">
+          </div>
+        </div>
+        <div class="comparison-panel comparison-panel-diff">
+          <div class="comparison-panel-header">
+            <span class="panel-label">Changes</span>
+            <span class="panel-hint">Magenta = changed pixels</span>
+          </div>
+          <div class="comparison-panel-image">
+            <img id="comparison-diff-img" src="" alt="Diff">
+          </div>
+        </div>
+        <div class="comparison-panel">
+          <div class="comparison-panel-header">
+            <span class="panel-label">After</span>
+            <span id="comparison-after-date" class="panel-date"></span>
+          </div>
+          <div class="comparison-panel-image">
+            <img id="comparison-after-img" src="" alt="After">
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/js/api.js"></script>

@@ -168,6 +168,15 @@ class ApiClient {
   getScreenshotThumbnailUrl(id) {
     return `${API_BASE}/screenshots/${id}/thumbnail?token=${encodeURIComponent(this.token)}`;
   }
+
+  // Comparison endpoints
+  getComparisonImageUrl(id1, id2) {
+    return `${API_BASE}/screenshots/${id1}/compare/${id2}?token=${encodeURIComponent(this.token)}`;
+  }
+
+  async getComparisonStats(id1, id2) {
+    return this.request(`/screenshots/${id1}/compare/${id2}/stats`);
+  }
 }
 
 // Global API client instance

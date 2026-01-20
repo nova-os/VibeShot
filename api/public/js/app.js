@@ -3,6 +3,10 @@
 let currentSite = null;
 let currentPage = null;
 let currentViewportFilter = null; // null means "all"
+let compareMode = false;
+let selectedForComparison = new Set();
+let screenshotsCache = []; // Cache screenshots for comparison selection
+let isSyncingScroll = false; // Flag to prevent scroll sync loops
 
 const VIEWPORT_LABELS = {
   mobile: '📱 Mobile',
@@ -185,19 +189,64 @@ function renderViewportTabs() {
   if (!container) return;
 
   container.innerHTML = `
-    <button class="viewport-tab ${currentViewportFilter === null ? 'active' : ''}" onclick="filterByViewport(null)">
-      All
-    </button>
-    <button class="viewport-tab ${currentViewportFilter === 'desktop' ? 'active' : ''}" onclick="filterByViewport('desktop')">
-      🖥️ Desktop
-    </button>
-    <button class="viewport-tab ${currentViewportFilter === 'tablet' ? 'active' : ''}" onclick="filterByViewport('tablet')">
-      📱 Tablet
-    </button>
-    <button class="viewport-tab ${currentViewportFilter === 'mobile' ? 'active' : ''}" onclick="filterByViewport('mobile')">
-      📱 Mobile
-    </button>
+    <div class="viewport-tabs-left">
+      <button class="viewport-tab ${currentViewportFilter === null ? 'active' : ''}" onclick="filterByViewport(null)">
+        All
+      </button>
+      <button class="viewport-tab ${currentViewportFilter === 'desktop' ? 'active' : ''}" onclick="filterByViewport('desktop')">
+        🖥️ Desktop
+      </button>
+      <button class="viewport-tab ${currentViewportFilter === 'tablet' ? 'active' : ''}" onclick="filterByViewport('tablet')">
+        📱 Tablet
+      </button>
+      <button class="viewport-tab ${currentViewportFilter === 'mobile' ? 'active' : ''}" onclick="filterByViewport('mobile')">
+        📱 Mobile
+      </button>
+    </div>
+    <div class="viewport-tabs-right">
+      <button class="btn ${compareMode ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="toggleCompareMode()">
+        ${compareMode ? '✕ Cancel' : '⟷ Compare'}
+      </button>
+      ${compareMode && selectedForComparison.size === 2 ? `
+        <button class="btn btn-primary btn-sm" onclick="showComparison()">
+          Compare Selected
+        </button>
+      ` : ''}
+    </div>
   `;
+}
+
+function toggleCompareMode() {
+  compareMode = !compareMode;
+  selectedForComparison.clear();
+  renderViewportTabs();
+  loadScreenshots(currentPage.id);
+}
+
+function toggleScreenshotSelection(id, event) {
+  event.stopPropagation();
+  
+  if (selectedForComparison.has(id)) {
+    selectedForComparison.delete(id);
+  } else {
+    if (selectedForComparison.size < 2) {
+      selectedForComparison.add(id);
+    } else {
+      showToast('You can only select 2 screenshots to compare', 'error');
+      return;
+    }
+  }
+  
+  renderViewportTabs();
+  // Update checkbox states without full reload
+  document.querySelectorAll('.screenshot-card').forEach(card => {
+    const cardId = parseInt(card.dataset.screenshotId);
+    const checkbox = card.querySelector('.compare-checkbox');
+    if (checkbox) {
+      checkbox.checked = selectedForComparison.has(cardId);
+    }
+    card.classList.toggle('selected-for-compare', selectedForComparison.has(cardId));
+  });
 }
 
 function filterByViewport(viewport) {
@@ -215,6 +264,9 @@ async function loadScreenshots(pageId) {
       viewport: currentViewportFilter 
     });
     const screenshots = result.screenshots;
+    
+    // Cache screenshots for comparison lookup
+    screenshotsCache = screenshots;
 
     if (screenshots.length === 0) {
       timeline.innerHTML = `
@@ -291,13 +343,28 @@ function renderScreenshotCard(screenshot, showViewport = false) {
     </span>
   ` : '';
   
+  const isSelected = selectedForComparison.has(screenshot.id);
+  const compareCheckbox = compareMode ? `
+    <label class="compare-checkbox-wrapper" onclick="toggleScreenshotSelection(${screenshot.id}, event)">
+      <input type="checkbox" class="compare-checkbox" ${isSelected ? 'checked' : ''}>
+      <span class="compare-checkbox-label">Select</span>
+    </label>
+  ` : '';
+  
+  const cardClick = compareMode 
+    ? `toggleScreenshotSelection(${screenshot.id}, event)` 
+    : `viewScreenshot(${screenshot.id})`;
+  
   return `
-    <div class="screenshot-card" onclick="viewScreenshot(${screenshot.id})">
+    <div class="screenshot-card ${isSelected ? 'selected-for-compare' : ''}" 
+         data-screenshot-id="${screenshot.id}"
+         onclick="${cardClick}">
       <div class="screenshot-thumb">
         <img src="${api.getScreenshotThumbnailUrl(screenshot.id)}" 
              alt="Screenshot" 
              onerror="this.parentElement.innerHTML='<span class=\\'placeholder\\'>📷</span>'">
         ${showViewport ? viewportBadge : ''}
+        ${compareCheckbox}
       </div>
       <div class="screenshot-info">
         ${!showViewport ? `<div class="screenshot-date">${formatDateTime(screenshot.created_at)}</div>` : ''}
@@ -355,6 +422,128 @@ function closeViewer() {
   document.body.style.overflow = '';
 }
 
+// Comparison View
+async function showComparison() {
+  if (selectedForComparison.size !== 2) {
+    showToast('Please select exactly 2 screenshots to compare', 'error');
+    return;
+  }
+  
+  const ids = Array.from(selectedForComparison);
+  const screenshot1 = screenshotsCache.find(s => s.id === ids[0]);
+  const screenshot2 = screenshotsCache.find(s => s.id === ids[1]);
+  
+  if (!screenshot1 || !screenshot2) {
+    showToast('Could not find selected screenshots', 'error');
+    return;
+  }
+  
+  // Sort by date (older first = "before")
+  const [before, after] = [screenshot1, screenshot2].sort(
+    (a, b) => new Date(a.created_at) - new Date(b.created_at)
+  );
+  
+  const comparisonViewer = document.getElementById('comparison-viewer');
+  const beforeImg = document.getElementById('comparison-before-img');
+  const afterImg = document.getElementById('comparison-after-img');
+  const diffImg = document.getElementById('comparison-diff-img');
+  const statsEl = document.getElementById('comparison-stats');
+  const beforeDate = document.getElementById('comparison-before-date');
+  const afterDate = document.getElementById('comparison-after-date');
+  
+  // Show viewer with loading state
+  comparisonViewer.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  
+  // Set loading state
+  statsEl.innerHTML = '<span class="loading-text">Analyzing changes...</span>';
+  diffImg.src = '';
+  diffImg.alt = 'Loading diff...';
+  
+  // Set dates
+  beforeDate.textContent = formatDateTime(before.created_at);
+  afterDate.textContent = formatDateTime(after.created_at);
+  
+  // Load before and after images
+  beforeImg.src = api.getScreenshotImageUrl(before.id);
+  afterImg.src = api.getScreenshotImageUrl(after.id);
+  
+  // Initialize synchronized scrolling
+  initComparisonSyncScroll();
+  
+  // Load diff image and stats
+  try {
+    const stats = await api.getComparisonStats(before.id, after.id);
+    
+    // Update stats display
+    const changeLevel = stats.diffPercentage < 1 ? 'minimal' : 
+                        stats.diffPercentage < 5 ? 'moderate' : 'significant';
+    
+    statsEl.innerHTML = `
+      <span class="diff-percentage diff-${changeLevel}">${stats.diffPercentage}% changed</span>
+      <span class="diff-pixels">${stats.diffPixels.toLocaleString()} pixels differ</span>
+    `;
+    
+    // Load diff image
+    diffImg.src = api.getComparisonImageUrl(before.id, after.id);
+  } catch (error) {
+    console.error('Failed to load comparison:', error);
+    statsEl.innerHTML = '<span class="error-text">Failed to generate comparison</span>';
+  }
+}
+
+function initComparisonSyncScroll() {
+  const panels = document.querySelectorAll('.comparison-panel-image');
+  
+  panels.forEach(panel => {
+    panel.addEventListener('scroll', handleComparisonScroll);
+  });
+}
+
+function handleComparisonScroll(event) {
+  if (isSyncingScroll) return;
+  
+  isSyncingScroll = true;
+  
+  const sourcePanel = event.target;
+  const panels = document.querySelectorAll('.comparison-panel-image');
+  
+  // Calculate scroll percentage for both axes
+  const scrollTopPercent = sourcePanel.scrollTop / (sourcePanel.scrollHeight - sourcePanel.clientHeight) || 0;
+  const scrollLeftPercent = sourcePanel.scrollLeft / (sourcePanel.scrollWidth - sourcePanel.clientWidth) || 0;
+  
+  panels.forEach(panel => {
+    if (panel !== sourcePanel) {
+      // Apply same scroll percentage to other panels
+      const maxScrollTop = panel.scrollHeight - panel.clientHeight;
+      const maxScrollLeft = panel.scrollWidth - panel.clientWidth;
+      
+      panel.scrollTop = scrollTopPercent * maxScrollTop;
+      panel.scrollLeft = scrollLeftPercent * maxScrollLeft;
+    }
+  });
+  
+  // Reset sync flag after a small delay to allow scroll events to settle
+  requestAnimationFrame(() => {
+    isSyncingScroll = false;
+  });
+}
+
+function cleanupComparisonSyncScroll() {
+  const panels = document.querySelectorAll('.comparison-panel-image');
+  panels.forEach(panel => {
+    panel.removeEventListener('scroll', handleComparisonScroll);
+  });
+}
+
+function closeComparisonViewer() {
+  // Clean up scroll event listeners
+  cleanupComparisonSyncScroll();
+  
+  document.getElementById('comparison-viewer').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
 // Trigger capture
 async function triggerCapture() {
   if (!currentPage) return;
@@ -379,6 +568,7 @@ function initModals() {
     if (e.key === 'Escape') {
       closeModal();
       closeViewer();
+      closeComparisonViewer();
     }
   });
 }
