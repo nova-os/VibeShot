@@ -262,6 +262,15 @@ async function dismissCookieConsent(page) {
     '#cmplz-cookiebanner-container .cmplz-accept',
     // Borlabs Cookie
     '.BorlabsCookie .brlbs-btn-accept-all',
+    '#BorlabsCookieBox a[data-cookie-accept-all]',
+    '[data-cookie-accept-all]',
+    // Real Cookie Banner (WordPress plugin)
+    '.rcb-btn-accept',
+    '[data-rcb-accept="all"]',
+    // Generic German consent patterns
+    'button[aria-label*="akzeptiere"]',
+    'button[aria-label*="Akzeptiere"]',
+    '[role="alertdialog"] button:first-of-type',
     // Quantcast
     '.qc-cmp2-summary-buttons button[mode="primary"]',
     // Didomi
@@ -296,17 +305,19 @@ async function dismissCookieConsent(page) {
         try {
           const frameClicked = await Promise.race([
             frame.evaluate(() => {
-              const acceptTexts = [
-                'accept', 'accept all', 'agree', 'zustimmen', 'alle akzeptieren',
-                'einverstanden', 'ok', 'okay', 'got it', 'verstanden'
+              // More specific patterns first, avoid false positives
+              const acceptPatterns = [
+                'ich akzeptiere alle', 'alle akzeptieren', 'einwilligung speichern',
+                'accept all', 'accept cookies', 'allow all', 'i agree',
+                'zustimmen', 'einverstanden', 'verstanden', 'got it'
               ];
               
               const buttons = [...document.querySelectorAll('button, [role="button"], a.button, .btn')];
-              for (const button of buttons) {
-                const text = (button.textContent || '').toLowerCase().trim();
-                const title = (button.getAttribute('title') || '').toLowerCase();
-                
-                for (const acceptText of acceptTexts) {
+              for (const acceptText of acceptPatterns) {
+                for (const button of buttons) {
+                  const text = (button.textContent || '').toLowerCase().trim();
+                  const title = (button.getAttribute('title') || '').toLowerCase();
+                  
                   if (text.includes(acceptText) || title.includes(acceptText)) {
                     const rect = button.getBoundingClientRect();
                     if (rect.width > 0 && rect.height > 0) {
@@ -337,23 +348,66 @@ async function dismissCookieConsent(page) {
 
     // Method 1: Try clicking buttons with common accept text
     const clicked = await page.evaluate(() => {
-      const acceptTexts = [
-        'accept', 'accept all', 'accept cookies', 'allow all', 'allow cookies',
-        'agree', 'i agree', 'ok', 'okay', 'got it', 'consent', 'alle akzeptieren',
-        'akzeptieren', 'zustimmen', 'einverstanden', 'accepter', 'accepter tout',
-        'tout accepter', 'aceptar', 'aceptar todo', 'accetta', 'accetta tutti',
-        'verstanden', 'alle zulassen', 'cookies zulassen'
+      // Patterns ordered from most specific to least specific
+      // Avoid short words that could match parts of other words (e.g., "ok" in "cookie")
+      const acceptPatterns = [
+        // German - most specific first
+        { text: 'ich akzeptiere alle', exact: false },
+        { text: 'alle akzeptieren', exact: false },
+        { text: 'alle cookies akzeptieren', exact: false },
+        { text: 'einwilligung speichern', exact: false },
+        { text: 'cookies akzeptieren', exact: false },
+        { text: 'akzeptiere alle', exact: false },
+        { text: 'alle zulassen', exact: false },
+        { text: 'cookies zulassen', exact: false },
+        { text: 'zustimmen', exact: false },
+        { text: 'einverstanden', exact: false },
+        { text: 'verstanden', exact: false },
+        // English
+        { text: 'accept all cookies', exact: false },
+        { text: 'accept all', exact: false },
+        { text: 'accept cookies', exact: false },
+        { text: 'allow all cookies', exact: false },
+        { text: 'allow all', exact: false },
+        { text: 'allow cookies', exact: false },
+        { text: 'i agree', exact: false },
+        { text: 'agree', exact: true },  // exact to avoid "disagree"
+        { text: 'got it', exact: false },
+        { text: 'accept', exact: true }, // exact to avoid matching in other contexts
+        // French
+        { text: 'tout accepter', exact: false },
+        { text: 'accepter tout', exact: false },
+        { text: 'accepter', exact: true },
+        // Spanish
+        { text: 'aceptar todo', exact: false },
+        { text: 'aceptar', exact: true },
+        // Italian
+        { text: 'accetta tutti', exact: false },
+        { text: 'accetta', exact: true },
+        // Short words - only match as standalone or at word boundaries
+        { text: 'ok', exact: true },
+        { text: 'okay', exact: true },
       ];
+      
+      // Helper function to check if pattern matches with word boundaries
+      const matchesPattern = (text, pattern, exact) => {
+        if (exact) {
+          // For exact matches, check word boundaries
+          const regex = new RegExp(`(^|\\s|[^a-zA-ZäöüÄÖÜß])${pattern}($|\\s|[^a-zA-ZäöüÄÖÜß])`, 'i');
+          return regex.test(text) || text === pattern;
+        }
+        return text.includes(pattern);
+      };
       
       // Find all buttons and clickable elements
       const buttons = [...document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"], .btn, [class*="button"]')];
       
-      for (const button of buttons) {
-        const text = (button.textContent || button.value || '').toLowerCase().trim();
-        const ariaLabel = (button.getAttribute('aria-label') || '').toLowerCase();
-        
-        for (const acceptText of acceptTexts) {
-          if (text.includes(acceptText) || ariaLabel.includes(acceptText)) {
+      for (const { text: acceptText, exact } of acceptPatterns) {
+        for (const button of buttons) {
+          const text = (button.textContent || button.value || '').toLowerCase().trim();
+          const ariaLabel = (button.getAttribute('aria-label') || '').toLowerCase();
+          
+          if (matchesPattern(text, acceptText, exact) || matchesPattern(ariaLabel, acceptText, exact)) {
             // Check if button is visible
             const rect = button.getBoundingClientRect();
             const style = window.getComputedStyle(button);
