@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIShot - Website Screenshot Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Auth View -->
+    <div id="auth-view" class="view">
+      <div class="auth-container">
+        <div class="auth-header">
+          <div class="logo">
+            <span class="logo-icon">◉</span>
+            <span class="logo-text">AIShot</span>
+          </div>
+          <p class="tagline">Monitor your websites with automated screenshots</p>
+        </div>
+        
+        <div class="auth-tabs">
+          <button class="tab-btn active" data-tab="login">Sign In</button>
+          <button class="tab-btn" data-tab="register">Create Account</button>
+        </div>
+
+        <form id="login-form" class="auth-form">
+          <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+          <p class="form-error" id="login-error"></p>
+        </form>
+
+        <form id="register-form" class="auth-form hidden">
+          <div class="form-group">
+            <label for="register-email">Email</label>
+            <input type="email" id="register-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="register-password">Password</label>
+            <input type="password" id="register-password" placeholder="Min 6 characters" required minlength="6">
+          </div>
+          <div class="form-group">
+            <label for="register-confirm">Confirm Password</label>
+            <input type="password" id="register-confirm" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+          <p class="form-error" id="register-error"></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- Main App View -->
+    <div id="main-view" class="view hidden">
+      <nav class="navbar">
+        <div class="nav-brand">
+          <span class="logo-icon">◉</span>
+          <span class="logo-text">AIShot</span>
+        </div>
+        <div class="nav-user">
+          <span id="user-email"></span>
+          <button id="logout-btn" class="btn btn-ghost">Logout</button>
+        </div>
+      </nav>
+
+      <main class="main-content">
+        <!-- Dashboard -->
+        <div id="dashboard-section" class="section">
+          <div class="section-header">
+            <h1>Monitored Sites</h1>
+            <button id="add-site-btn" class="btn btn-primary">
+              <span>+</span> Add Site
+            </button>
+          </div>
+          
+          <div id="sites-grid" class="sites-grid">
+            <!-- Sites will be rendered here -->
+          </div>
+          
+          <div id="empty-state" class="empty-state hidden">
+            <div class="empty-icon">📸</div>
+            <h2>No sites yet</h2>
+            <p>Add your first website to start monitoring</p>
+            <button class="btn btn-primary" onclick="document.getElementById('add-site-btn').click()">
+              Add Your First Site
+            </button>
+          </div>
+        </div>
+
+        <!-- Site Detail -->
+        <div id="site-detail-section" class="section hidden">
+          <div class="section-header">
+            <button id="back-to-dashboard" class="btn btn-ghost">← Back</button>
+            <div class="site-title">
+              <h1 id="site-name"></h1>
+              <span id="site-domain" class="site-domain"></span>
+            </div>
+            <div class="site-actions">
+              <button id="add-page-btn" class="btn btn-primary">+ Add Page</button>
+              <button id="delete-site-btn" class="btn btn-danger">Delete Site</button>
+            </div>
+          </div>
+
+          <div id="pages-list" class="pages-list">
+            <!-- Pages will be rendered here -->
+          </div>
+        </div>
+
+        <!-- Screenshots Gallery -->
+        <div id="screenshots-section" class="section hidden">
+          <div class="section-header">
+            <button id="back-to-site" class="btn btn-ghost">← Back</button>
+            <div class="page-title">
+              <h1 id="page-name"></h1>
+              <span id="page-url" class="page-url"></span>
+            </div>
+            <div class="page-actions">
+              <button id="capture-now-btn" class="btn btn-primary">📷 Capture Now</button>
+              <button id="edit-page-btn" class="btn btn-secondary">Edit</button>
+              <button id="delete-page-btn" class="btn btn-danger">Delete</button>
+            </div>
+          </div>
+
+          <div id="screenshots-timeline" class="screenshots-timeline">
+            <!-- Screenshots will be rendered here -->
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+      <div class="modal" id="modal">
+        <div class="modal-header">
+          <h2 id="modal-title"></h2>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="modal-body">
+          <!-- Modal content -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Screenshot Viewer -->
+    <div id="screenshot-viewer" class="screenshot-viewer hidden">
+      <div class="viewer-header">
+        <div class="viewer-header-info">
+          <span id="viewer-date"></span>
+          <span id="viewer-size"></span>
+          <span id="viewer-dimensions"></span>
+        </div>
+        <button class="viewer-close" onclick="closeViewer()">×</button>
+      </div>
+      <div class="viewer-content">
+        <img id="viewer-image" src="" alt="Screenshot">
+      </div>
+      <div id="viewer-scroll-hint" class="viewer-scroll-hint hidden">
+        ↓ Scroll to see more ↓
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

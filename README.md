@@ -1,0 +1,204 @@
+# AIShot - Website Screenshot Monitor
+
+A web application for automated website screenshot monitoring. Track visual changes on your websites with periodic full-page screenshots.
+
+## Features
+
+- **Multi-user authentication** - Secure JWT-based login system
+- **Site management** - Organize monitored pages by domain/site
+- **Configurable intervals** - Set custom capture intervals per page
+- **Full-page screenshots** - Captures entire page using Puppeteer
+- **Thumbnail generation** - Quick preview thumbnails for the gallery
+- **Screenshot timeline** - Browse historical screenshots with viewer
+- **Background worker** - Independent screenshot capture process
+- **Browser pool** - 4 parallel Puppeteer instances for efficiency
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker Compose                           │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   MySQL     │  │  API Server │  │  Screenshot Worker  │ │
+│  │  Database   │  │  (Express)  │  │   (Puppeteer x4)    │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+│         │                │                    │             │
+│         └────────────────┼────────────────────┘             │
+│                          │                                  │
+│                   Screenshots Volume                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Git
+
+### Setup
+
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd aishot
+   ```
+
+2. Create environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Edit `.env` and set secure values:
+   ```env
+   MYSQL_ROOT_PASSWORD=your-secure-root-password
+   MYSQL_DATABASE=aishot
+   MYSQL_USER=aishot
+   MYSQL_PASSWORD=your-secure-password
+   JWT_SECRET=your-super-secret-jwt-key-change-this
+   ```
+
+4. Start the application:
+   ```bash
+   docker-compose up -d
+   ```
+
+5. Open http://localhost:3000 in your browser
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MYSQL_ROOT_PASSWORD` | MySQL root password | - |
+| `MYSQL_DATABASE` | Database name | aishot |
+| `MYSQL_USER` | Database user | aishot |
+| `MYSQL_PASSWORD` | Database password | - |
+| `JWT_SECRET` | Secret for JWT tokens | - |
+| `BROWSER_POOL_SIZE` | Number of parallel browsers | 4 |
+
+### Screenshot Intervals
+
+When adding a page, you can configure the capture interval in minutes:
+- Minimum: 5 minutes
+- Default: 360 minutes (6 hours)
+- Recommended: 60-1440 minutes (1-24 hours)
+
+## Usage
+
+1. **Register/Login** - Create an account or sign in
+2. **Add a Site** - Click "Add Site" and enter the domain name
+3. **Add Pages** - Navigate to the site and add pages to monitor
+4. **Configure Intervals** - Set how often to capture each page
+5. **View Screenshots** - Browse the screenshot timeline for each page
+6. **Trigger Capture** - Use "Capture Now" for immediate screenshots
+
+## Development
+
+### Local Development (without Docker)
+
+1. Install dependencies:
+   ```bash
+   cd api && npm install
+   cd ../worker && npm install
+   ```
+
+2. Start MySQL locally or via Docker:
+   ```bash
+   docker run -d --name aishot-mysql \
+     -e MYSQL_ROOT_PASSWORD=root \
+     -e MYSQL_DATABASE=aishot \
+     -e MYSQL_USER=aishot \
+     -e MYSQL_PASSWORD=password \
+     -p 3306:3306 \
+     mysql:8.0
+   ```
+
+3. Initialize database:
+   ```bash
+   mysql -u aishot -p aishot < mysql/init.sql
+   ```
+
+4. Start the API server:
+   ```bash
+   cd api
+   npm run dev
+   ```
+
+5. Start the worker (in another terminal):
+   ```bash
+   cd worker
+   npm run dev
+   ```
+
+### Project Structure
+
+```
+aishot/
+├── docker-compose.yml      # Docker orchestration
+├── api/                    # Express.js API server
+│   ├── src/
+│   │   ├── index.js        # Server entry point
+│   │   ├── config/         # Database configuration
+│   │   ├── middleware/     # Auth middleware
+│   │   └── routes/         # API routes
+│   └── public/             # Frontend static files
+├── worker/                 # Background screenshot worker
+│   └── src/
+│       ├── index.js        # Worker entry point
+│       ├── scheduler.js    # Job scheduling
+│       ├── browser-pool.js # Puppeteer pool management
+│       └── screenshot.js   # Screenshot capture logic
+└── mysql/
+    └── init.sql            # Database schema
+```
+
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/register` - Create account
+- `POST /api/auth/login` - Login
+- `GET /api/auth/me` - Get current user
+
+### Sites
+- `GET /api/sites` - List all sites
+- `POST /api/sites` - Create site
+- `GET /api/sites/:id` - Get site
+- `PUT /api/sites/:id` - Update site
+- `DELETE /api/sites/:id` - Delete site
+
+### Pages
+- `GET /api/sites/:id/pages` - List pages for site
+- `POST /api/sites/:id/pages` - Add page to site
+- `GET /api/pages/:id` - Get page
+- `PUT /api/pages/:id` - Update page
+- `DELETE /api/pages/:id` - Delete page
+- `POST /api/pages/:id/capture` - Trigger capture
+
+### Screenshots
+- `GET /api/pages/:id/screenshots` - List screenshots
+- `GET /api/screenshots/:id` - Get metadata
+- `GET /api/screenshots/:id/image` - Get image file
+- `GET /api/screenshots/:id/thumbnail` - Get thumbnail
+- `DELETE /api/screenshots/:id` - Delete screenshot
+
+## Troubleshooting
+
+### Worker not capturing screenshots
+- Check worker logs: `docker-compose logs worker`
+- Ensure the page URL is accessible
+- Verify the page is set to "active"
+
+### Database connection errors
+- Wait for MySQL to fully initialize (may take 30-60 seconds)
+- Check MySQL logs: `docker-compose logs mysql`
+
+### Out of disk space
+- Screenshots are stored in a Docker volume
+- Clean old screenshots through the UI or directly in the database
+
+## License
+
+MIT

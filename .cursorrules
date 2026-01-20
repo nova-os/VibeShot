@@ -1,0 +1,246 @@
+# AIShot - Website Screenshot Monitor
+
+## Project Overview
+
+AIShot is a web application for automated website screenshot monitoring. It captures periodic full-page screenshots of configured web pages and stores them for historical comparison.
+
+## Architecture
+
+The application uses a microservices architecture with Docker Compose:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker Compose                           │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   MySQL     │  │  API Server │  │  Screenshot Worker  │ │
+│  │  Database   │  │  (Express)  │  │   (Puppeteer x4)    │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Services
+
+1. **mysql** - MySQL 8.0 database for persistent storage
+2. **api** - Express.js REST API server (port 3000) serving both API and static frontend
+3. **worker** - Background screenshot worker with Puppeteer browser pool
+
+## Directory Structure
+
+```
+aishot/
+├── docker-compose.yml          # Service orchestration
+├── .env                        # Environment variables (not in git)
+├── api/                        # Express.js API server
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── src/
+│   │   ├── index.js            # Server entry, middleware setup
+│   │   ├── config/
+│   │   │   └── database.js     # MySQL connection pool
+│   │   ├── middleware/
+│   │   │   └── auth.js         # JWT authentication middleware
+│   │   └── routes/
+│   │       ├── auth.js         # Register/Login endpoints
+│   │       ├── sites.js        # Site CRUD + pages listing
+│   │       ├── pages.js        # Page CRUD + screenshots listing
+│   │       └── screenshots.js  # Screenshot metadata + image serving
+│   └── public/                 # Static frontend (vanilla JS SPA)
+│       ├── index.html
+│       ├── css/style.css
+│       └── js/
+│           ├── api.js          # API client class
+│           ├── auth.js         # Authentication handling
+│           └── app.js          # Main application logic
+├── worker/                     # Background screenshot worker
+│   ├── Dockerfile
+│   ├── package.json
+│   └── src/
+│       ├── index.js            # Worker entry point
+│       ├── scheduler.js        # Job scheduling (polls DB every 60s)
+│       ├── browser-pool.js     # Fixed-size Puppeteer browser pool (4 instances)
+│       ├── screenshot.js       # Screenshot capture + thumbnail generation
+│       └── config/
+│           └── database.js     # MySQL connection pool
+└── mysql/
+    └── init.sql                # Database schema initialization
+```
+
+## Database Schema
+
+### Tables
+
+- **users** - User accounts with email/password authentication
+- **sites** - Monitored websites/domains (belongs to user)
+- **pages** - Individual pages to capture (belongs to site)
+- **screenshots** - Captured screenshot records (belongs to page)
+
+### Key Relationships
+
+```
+users (1) ──< sites (1) ──< pages (1) ──< screenshots
+```
+
+### Important Fields
+
+- `pages.interval_minutes` - How often to capture (default: 360 = 6 hours)
+- `pages.last_screenshot_at` - When last captured (NULL triggers immediate capture)
+- `pages.is_active` - Enable/disable capturing
+- `screenshots.file_path` - Relative path to stored image
+- `screenshots.thumbnail_path` - Relative path to thumbnail
+
+## Key Mechanics
+
+### Authentication
+
+- JWT-based authentication with 7-day token expiry
+- Tokens can be passed via:
+  - `Authorization: Bearer <token>` header (for API calls)
+  - `?token=<token>` query parameter (for image `<img>` tags)
+- Passwords hashed with bcrypt (10 rounds)
+
+### Browser Pool (worker/src/browser-pool.js)
+
+The worker maintains a fixed pool of 4 Puppeteer browser instances:
+
+```javascript
+// Key methods:
+pool.initialize()     // Launch 4 browsers at startup
+pool.acquire()        // Get available browser (waits if all busy)
+pool.release(browser) // Return browser to pool
+pool.shutdown()       // Close all browsers gracefully
+```
+
+- Browsers are reused across captures for efficiency
+- Auto-recovery: crashed browsers are automatically respawned
+- Jobs queue when all browsers are busy (5-minute timeout)
+
+### Scheduler (worker/src/scheduler.js)
+
+Polling-based job scheduler:
+
+1. Polls database every 60 seconds
+2. Queries pages where:
+   - `is_active = TRUE`
+   - `last_screenshot_at IS NULL` OR interval has elapsed
+3. Processes pages in parallel (limited by browser pool)
+4. Updates `last_screenshot_at` after successful capture
+
+### Screenshot Capture (worker/src/screenshot.js)
+
+For each page:
+
+1. Acquire browser from pool
+2. Create new page, set viewport (1920x1080)
+3. Navigate with `networkidle2` wait strategy
+4. Wait 2 seconds for dynamic content
+5. Capture full-page PNG screenshot
+6. Generate thumbnail (400px width) using Sharp
+7. Save files to: `screenshots/{pageId}/{year}/{month}/{timestamp}.png`
+8. Record metadata in database
+9. Release browser back to pool
+
+### File Storage
+
+Screenshots stored in Docker volume at `/app/screenshots/`:
+```
+screenshots/
+└── {pageId}/
+    └── {year}/
+        └── {month}/
+            ├── {timestamp}.png           # Full screenshot
+            └── {timestamp}_thumb.png     # Thumbnail (400px wide)
+```
+
+## API Endpoints
+
+### Authentication
+- `POST /api/auth/register` - Create account
+- `POST /api/auth/login` - Login, returns JWT
+- `GET /api/auth/me` - Get current user
+
+### Sites (requires auth)
+- `GET /api/sites` - List user's sites (with page/screenshot counts)
+- `POST /api/sites` - Create site
+- `GET /api/sites/:id` - Get site details
+- `PUT /api/sites/:id` - Update site
+- `DELETE /api/sites/:id` - Delete site (cascades)
+- `GET /api/sites/:id/pages` - List pages for site
+- `POST /api/sites/:id/pages` - Add page to site
+
+### Pages (requires auth)
+- `GET /api/pages/:id` - Get page details
+- `PUT /api/pages/:id` - Update page settings
+- `DELETE /api/pages/:id` - Delete page (cascades)
+- `GET /api/pages/:id/screenshots` - List screenshots (paginated)
+- `POST /api/pages/:id/capture` - Trigger immediate capture
+
+### Screenshots (requires auth)
+- `GET /api/screenshots/:id` - Get metadata
+- `GET /api/screenshots/:id/image?token=...` - Serve full image
+- `GET /api/screenshots/:id/thumbnail?token=...` - Serve thumbnail
+- `DELETE /api/screenshots/:id` - Delete screenshot + files
+
+## Environment Variables
+
+```env
+# MySQL
+MYSQL_ROOT_PASSWORD=...
+MYSQL_DATABASE=aishot
+MYSQL_USER=aishot
+MYSQL_PASSWORD=...
+
+# JWT
+JWT_SECRET=...
+
+# Worker
+BROWSER_POOL_SIZE=4  # Number of parallel browsers
+```
+
+## Development Notes
+
+### Development Setup
+
+Source code is mounted as volumes - changes are picked up automatically via nodemon:
+- `api/src/` and `api/public/` → API container (hot reload)
+- `worker/src/` → Worker container (hot reload)
+
+Data is persisted in local directories:
+- `data/mysql/` → MySQL database files
+- `data/screenshots/` → Screenshot images
+
+### Scripts
+
+```bash
+./scripts/setup.sh    # Initial setup (create dirs, build images)
+./scripts/start.sh    # Start all services
+./scripts/stop.sh     # Stop all services
+./scripts/install.sh  # Reinstall dependencies after package.json changes
+./scripts/logs.sh     # View logs (or ./scripts/logs.sh api)
+./scripts/reset.sh    # Reset all data (database + screenshots)
+```
+
+### Adding New Features
+
+1. **New API endpoint**: Add route in `api/src/routes/`, register in `api/src/index.js` (auto-reloads)
+2. **Database changes**: Update `mysql/init.sql`, run `./scripts/reset.sh` to recreate
+3. **Frontend changes**: Edit files in `api/public/` (no rebuild needed)
+4. **Worker changes**: Edit files in `worker/src/` (auto-reloads)
+5. **New dependencies**: Update package.json, run `./scripts/install.sh`
+
+### Rebuilding (only needed for dependency changes)
+
+```bash
+./scripts/install.sh
+
+# Or manually:
+docker-compose up -d --build api
+docker-compose up -d --build worker
+```
+
+### Common Issues
+
+1. **401 on images**: Token must be passed via query parameter for `<img>` src
+2. **Screenshots not captured**: Check worker logs, verify page is active
+3. **Database connection**: Wait for MySQL healthy check before API/worker start
+4. **Code changes not detected**: Ensure files are in mounted directories (src/public)
