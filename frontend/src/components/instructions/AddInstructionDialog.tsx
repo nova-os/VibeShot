@@ -1,0 +1,143 @@
+import { useState } from 'react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Icon } from '@/components/ui/icon'
+import { api } from '@/lib/api'
+import { toast } from 'sonner'
+
+interface AddInstructionDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  pageId: number
+  onSuccess: () => void
+}
+
+export function AddInstructionDialog({
+  open,
+  onOpenChange,
+  pageId,
+  onSuccess,
+}: AddInstructionDialogProps) {
+  const [name, setName] = useState('')
+  const [prompt, setPrompt] = useState('')
+  const [viewport, setViewport] = useState('desktop')
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    try {
+      const instruction = await api.createInstruction(pageId, { name, prompt, viewport })
+      
+      if (instruction.generationError) {
+        toast.error(`Instruction created but script generation failed: ${instruction.generationError}`)
+      } else if (instruction.script) {
+        toast.success('Instruction created with AI-generated script')
+      } else {
+        toast.success('Instruction created')
+      }
+      
+      setName('')
+      setPrompt('')
+      setViewport('desktop')
+      onOpenChange(false)
+      onSuccess()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create instruction')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add Instruction</DialogTitle>
+          <DialogDescription>
+            Create an AI-powered instruction to automate page interactions before screenshots are captured.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="instruction-name">Name</Label>
+              <Input
+                id="instruction-name"
+                placeholder="e.g., Open mobile menu"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                disabled={isLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="instruction-prompt">Instruction</Label>
+              <Textarea
+                id="instruction-prompt"
+                placeholder="Describe what you want to do on the page, e.g., 'Click the hamburger menu icon to open the mobile navigation'"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={4}
+                required
+                disabled={isLoading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Describe the action in plain English. AI will analyze the page and generate the script.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="instruction-viewport">Viewport for analysis</Label>
+              <Select value={viewport} onValueChange={setViewport} disabled={isLoading}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desktop">Desktop (1920px)</SelectItem>
+                  <SelectItem value="tablet">Tablet (768px)</SelectItem>
+                  <SelectItem value="mobile">Mobile (375px)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                The viewport size used when AI analyzes the page to generate the script.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Icon name="progress_activity" className="animate-spin" size="sm" />
+                  Generating script...
+                </>
+              ) : (
+                'Create Instruction'
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}

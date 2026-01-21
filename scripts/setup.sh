@@ -27,6 +27,13 @@ else
     echo "✅ .env file already exists"
 fi
 
+# Build frontend
+echo "🎨 Building frontend..."
+cd frontend
+npm install
+npm run build
+cd "$PROJECT_DIR"
+
 # Build Docker images
 echo "🔨 Building Docker images..."
 docker-compose build
@@ -39,3 +46,6 @@ echo "  ./scripts/start.sh"
 echo ""
 echo "To install/update dependencies after package.json changes:"
 echo "  ./scripts/install.sh"
+echo ""
+echo "To rebuild frontend after changes:"
+echo "  cd frontend && npm run build"

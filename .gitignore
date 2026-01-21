@@ -29,3 +29,12 @@ build/
 
 # Data directories (persisted locally)
 data/
+
+# Frontend (Vite/React)
+*.tsbuildinfo
+.vite/
+
+# React build output (generated files - rebuild with: cd frontend && npm run build)
+api/public/assets/
+api/public/index.html
+api/public/vite.svg

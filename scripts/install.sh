@@ -12,6 +12,13 @@ cd "$PROJECT_DIR"
 
 echo "📦 Installing dependencies..."
 
+# Install frontend dependencies
+echo "🎨 Installing frontend dependencies..."
+cd frontend
+npm install
+npm run build
+cd "$PROJECT_DIR"
+
 # Rebuild images to install new dependencies
 echo "🔨 Rebuilding API..."
 docker-compose build api
