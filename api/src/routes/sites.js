@@ -4,6 +4,8 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
+const WORKER_URL = process.env.WORKER_URL || 'http://worker:3001';
+
 // All routes require authentication
 router.use(authenticateToken);
 
@@ -145,6 +147,98 @@ router.get('/:id/pages', async (req, res) => {
   } catch (error) {
     console.error('Get pages error:', error);
     res.status(500).json({ error: 'Failed to get pages' });
+  }
+});
+
+// Discover pages for a site using AI
+router.post('/:id/discover-pages', async (req, res) => {
+  try {
+    const { maxPages = 10 } = req.body;
+
+    // Verify ownership
+    const [sites] = await db.query(
+      'SELECT * FROM sites WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (sites.length === 0) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const site = sites[0];
+
+    // Call worker API to discover pages
+    const response = await fetch(`${WORKER_URL}/discover-pages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        domain: site.domain,
+        maxPages 
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      return res.status(500).json({ 
+        error: result.error || 'Failed to discover pages' 
+      });
+    }
+
+    res.json({
+      pages: result.pages,
+      totalFound: result.totalFound
+    });
+  } catch (error) {
+    console.error('Discover pages error:', error);
+    res.status(500).json({ error: 'Failed to discover pages' });
+  }
+});
+
+// Bulk create pages for a site
+router.post('/:id/pages/bulk', async (req, res) => {
+  try {
+    const { pages } = req.body;
+
+    if (!pages || !Array.isArray(pages) || pages.length === 0) {
+      return res.status(400).json({ error: 'Pages array is required' });
+    }
+
+    // Verify ownership
+    const [sites] = await db.query(
+      'SELECT * FROM sites WHERE id = ? AND user_id = ?',
+      [req.params.id, req.user.id]
+    );
+
+    if (sites.length === 0) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    // Insert all pages
+    const createdPages = [];
+    for (const page of pages) {
+      const { url, name, interval_minutes = 360 } = page;
+      
+      if (!url || !name) continue;
+
+      const [result] = await db.query(
+        'INSERT INTO pages (site_id, url, name, interval_minutes) VALUES (?, ?, ?, ?)',
+        [req.params.id, url, name, interval_minutes]
+      );
+
+      const [newPages] = await db.query('SELECT * FROM pages WHERE id = ?', [result.insertId]);
+      if (newPages.length > 0) {
+        createdPages.push(newPages[0]);
+      }
+    }
+
+    res.status(201).json({ 
+      created: createdPages.length,
+      pages: createdPages 
+    });
+  } catch (error) {
+    console.error('Bulk create pages error:', error);
+    res.status(500).json({ error: 'Failed to create pages' });
   }
 });
 

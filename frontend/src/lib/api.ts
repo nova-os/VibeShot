@@ -62,6 +62,22 @@ export interface ComparisonStats {
   diffPixels: number
 }
 
+export interface DiscoveredPage {
+  url: string
+  title: string
+  reason: string
+}
+
+export interface DiscoverPagesResponse {
+  pages: DiscoveredPage[]
+  totalFound: number
+}
+
+export interface BulkCreatePagesResponse {
+  created: number
+  pages: Page[]
+}
+
 export interface ScreenshotsResponse {
   screenshots: Screenshot[]
   total: number
@@ -197,6 +213,23 @@ class ApiClient {
     return this.request<Page>(`/sites/${siteId}/pages`, {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  }
+
+  async discoverPages(siteId: number, maxPages: number = 10): Promise<DiscoverPagesResponse> {
+    return this.request<DiscoverPagesResponse>(`/sites/${siteId}/discover-pages`, {
+      method: 'POST',
+      body: JSON.stringify({ maxPages }),
+    })
+  }
+
+  async bulkCreatePages(
+    siteId: number,
+    pages: Array<{ url: string; name: string; interval_minutes?: number }>
+  ): Promise<BulkCreatePagesResponse> {
+    return this.request<BulkCreatePagesResponse>(`/sites/${siteId}/pages/bulk`, {
+      method: 'POST',
+      body: JSON.stringify({ pages }),
     })
   }
 

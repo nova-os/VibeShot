@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/icon'
 import { PageCard, PageCardSkeleton } from '@/components/pages/PageCard'
 import { AddPageDialog } from '@/components/pages/AddPageDialog'
 import { DeleteSiteDialog } from '@/components/sites/DeleteSiteDialog'
+import { DiscoverPagesDialog } from '@/components/sites/DiscoverPagesDialog'
 import { toast } from 'sonner'
 
 export function SiteDetailPage() {
@@ -16,6 +17,7 @@ export function SiteDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [addPageDialogOpen, setAddPageDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [discoverDialogOpen, setDiscoverDialogOpen] = useState(false)
 
   const loadData = useCallback(async () => {
     if (!siteId) return
@@ -87,6 +89,10 @@ export function SiteDetailPage() {
         </div>
 
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setDiscoverDialogOpen(true)}>
+            <Icon name="auto_awesome" size="sm" />
+            AI Discover
+          </Button>
           <Button onClick={() => setAddPageDialogOpen(true)}>
             <Icon name="add" size="sm" />
             Add Page
@@ -103,11 +109,19 @@ export function SiteDetailPage() {
         <div className="text-center py-16 border border-dashed border-border rounded-lg">
           <Icon name="web" size="xl" className="text-muted-foreground mb-4" />
           <h2 className="text-xl font-semibold mb-2">No pages monitored</h2>
-          <p className="text-muted-foreground mb-6">Add pages to start capturing screenshots</p>
-          <Button onClick={() => setAddPageDialogOpen(true)}>
-            <Icon name="add" size="sm" />
-            Add Page
-          </Button>
+          <p className="text-muted-foreground mb-6">
+            Add pages manually or let AI discover important pages automatically
+          </p>
+          <div className="flex justify-center gap-3">
+            <Button variant="outline" onClick={() => setDiscoverDialogOpen(true)}>
+              <Icon name="auto_awesome" size="sm" />
+              AI Discover Pages
+            </Button>
+            <Button onClick={() => setAddPageDialogOpen(true)}>
+              <Icon name="add" size="sm" />
+              Add Page Manually
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -129,6 +143,13 @@ export function SiteDetailPage() {
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         site={site}
+      />
+
+      <DiscoverPagesDialog
+        open={discoverDialogOpen}
+        onOpenChange={setDiscoverDialogOpen}
+        site={site}
+        onSuccess={loadData}
       />
     </div>
   )

@@ -1,14 +1,16 @@
 const express = require('express');
 const ScriptGenerator = require('./script-generator');
+const PageDiscovery = require('./page-discovery');
 
 /**
- * Worker HTTP API - Provides endpoints for script generation
+ * Worker HTTP API - Provides endpoints for script generation and page discovery
  * This API is internal and should only be called by the main API server.
  */
 class WorkerApi {
   constructor(browserPool) {
     this.browserPool = browserPool;
     this.scriptGenerator = new ScriptGenerator(browserPool);
+    this.pageDiscovery = new PageDiscovery(browserPool);
     this.app = express();
     this.server = null;
     
@@ -64,6 +66,42 @@ class WorkerApi {
         }
       } catch (error) {
         console.error('WorkerAPI: Generate script error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Discover pages endpoint
+    this.app.post('/discover-pages', async (req, res) => {
+      const { domain, maxPages } = req.body;
+
+      if (!domain) {
+        return res.status(400).json({ 
+          error: 'Missing required field: domain' 
+        });
+      }
+
+      try {
+        const result = await this.pageDiscovery.discover(domain, { 
+          maxPages: maxPages || 10 
+        });
+        
+        if (result.success) {
+          res.json({
+            success: true,
+            pages: result.pages,
+            totalFound: result.totalFound
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: result.error
+          });
+        }
+      } catch (error) {
+        console.error('WorkerAPI: Discover pages error:', error);
         res.status(500).json({
           success: false,
           error: error.message
