@@ -53,3 +53,23 @@ CREATE TABLE IF NOT EXISTS screenshots (
     INDEX idx_created_at (created_at),
     INDEX idx_viewport (viewport)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Instructions table (AI-generated page interaction scripts)
+CREATE TABLE IF NOT EXISTS instructions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    page_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    prompt TEXT NOT NULL,
+    script TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    execution_order INT DEFAULT 0,
+    last_error TEXT,
+    last_error_at TIMESTAMP NULL,
+    last_success_at TIMESTAMP NULL,
+    error_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+    INDEX idx_page_id (page_id),
+    INDEX idx_execution_order (execution_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

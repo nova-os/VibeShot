@@ -7,6 +7,8 @@ let compareMode = false;
 let selectedForComparison = new Set();
 let screenshotsCache = []; // Cache screenshots for comparison selection
 let isSyncingScroll = false; // Flag to prevent scroll sync loops
+let currentInstructions = []; // Instructions for current page
+let isGeneratingScript = false; // Track script generation state
 
 const VIEWPORT_LABELS = {
   mobile: '📱 Mobile',
@@ -168,8 +170,13 @@ async function showScreenshots(pageId) {
   document.getElementById('screenshots-section').classList.remove('hidden');
 
   try {
-    const page = await api.getPage(pageId);
+    const [page, instructions] = await Promise.all([
+      api.getPage(pageId),
+      api.getInstructions(pageId)
+    ]);
+    
     currentPage = page;
+    currentInstructions = instructions;
     currentViewportFilter = null; // Reset filter when switching pages
 
     document.getElementById('page-name').textContent = page.name;
@@ -177,6 +184,9 @@ async function showScreenshots(pageId) {
 
     // Render viewport filter tabs
     renderViewportTabs();
+    
+    // Render instructions section
+    renderInstructions();
     
     loadScreenshots(pageId);
   } catch (error) {
@@ -323,11 +333,18 @@ function renderScreenshotGroup(group) {
     (order[a.viewport] || 99) - (order[b.viewport] || 99)
   );
   
+  const screenshotIds = group.screenshots.map(s => s.id).join(',');
+  
   return `
     <div class="screenshot-group">
       <div class="screenshot-group-header">
-        <span class="screenshot-group-date">${formatDateTime(group.timestamp)}</span>
-        <span class="screenshot-group-count">${group.screenshots.length} viewport${group.screenshots.length !== 1 ? 's' : ''}</span>
+        <div class="screenshot-group-info">
+          <span class="screenshot-group-date">${formatDateTime(group.timestamp)}</span>
+          <span class="screenshot-group-count">${group.screenshots.length} viewport${group.screenshots.length !== 1 ? 's' : ''}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-delete-set" onclick="confirmDeleteScreenshotSet([${screenshotIds}], event)" title="Delete this screenshot set">
+          🗑️
+        </button>
       </div>
       <div class="screenshot-group-items">
         ${group.screenshots.map(screenshot => renderScreenshotCard(screenshot, true)).join('')}
@@ -763,6 +780,357 @@ async function deletePage() {
     showToast('Failed to delete page: ' + error.message, 'error');
   }
 }
+
+function confirmDeleteScreenshotSet(ids, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  const count = ids.length;
+  
+  showModal('Delete Screenshot Set', `
+    <p>Are you sure you want to delete this screenshot set?</p>
+    <p class="text-muted">This will delete ${count} screenshot${count !== 1 ? 's' : ''} (all viewports from this capture).</p>
+    <div class="modal-actions" style="margin-top: 24px;">
+      <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn btn-danger" onclick="deleteScreenshotSet([${ids.join(',')}])">Delete Set</button>
+    </div>
+  `);
+}
+
+async function deleteScreenshotSet(ids) {
+  if (!currentPage) return;
+
+  try {
+    const result = await api.deleteScreenshotSet(ids);
+    closeModal();
+    showToast(`Deleted ${result.deletedCount} screenshot${result.deletedCount !== 1 ? 's' : ''}`, 'success');
+    loadScreenshots(currentPage.id);
+  } catch (error) {
+    showToast('Failed to delete screenshot set: ' + error.message, 'error');
+  }
+}
+
+// ============================================
+// INSTRUCTIONS
+// ============================================
+
+function renderInstructions() {
+  const container = document.getElementById('instructions-section');
+  if (!container) return;
+
+  const hasInstructions = currentInstructions && currentInstructions.length > 0;
+  
+  container.innerHTML = `
+    <div class="instructions-header">
+      <h3>AI Instructions</h3>
+      <button class="btn btn-sm btn-primary" onclick="showAddInstructionModal()">
+        + Add Instruction
+      </button>
+    </div>
+    ${hasInstructions ? `
+      <div class="instructions-list">
+        ${currentInstructions.map((instruction, index) => renderInstructionCard(instruction, index)).join('')}
+      </div>
+    ` : `
+      <div class="instructions-empty">
+        <p>No instructions configured. Add instructions to automate page interactions before screenshots are captured.</p>
+      </div>
+    `}
+  `;
+}
+
+function renderInstructionCard(instruction, index) {
+  const isFirst = index === 0;
+  const isLast = index === currentInstructions.length - 1;
+  const hasScript = instruction.script && instruction.script.trim().length > 0;
+  const hasError = instruction.last_error && instruction.last_error.trim().length > 0;
+  const hasSuccess = instruction.last_success_at;
+  
+  // Determine status: error > ready > pending
+  let statusBadge;
+  if (hasError) {
+    const errorTime = instruction.last_error_at ? formatDateTime(instruction.last_error_at) : '';
+    statusBadge = `<span class="status-badge status-error" title="Last error: ${errorTime}">Error</span>`;
+  } else if (hasScript && hasSuccess) {
+    statusBadge = `<span class="status-badge status-success" title="Last success: ${formatDateTime(instruction.last_success_at)}">Success</span>`;
+  } else if (hasScript) {
+    statusBadge = `<span class="status-badge status-ready" title="Script generated">Ready</span>`;
+  } else {
+    statusBadge = `<span class="status-badge status-pending" title="No script generated">Pending</span>`;
+  }
+  
+  return `
+    <div class="instruction-card ${instruction.is_active ? '' : 'inactive'} ${hasError ? 'has-error' : ''}" data-instruction-id="${instruction.id}">
+      <div class="instruction-header">
+        <div class="instruction-order">
+          <button class="btn-icon" onclick="moveInstruction(${instruction.id}, 'up')" ${isFirst ? 'disabled' : ''} title="Move up">▲</button>
+          <span class="order-number">${index + 1}</span>
+          <button class="btn-icon" onclick="moveInstruction(${instruction.id}, 'down')" ${isLast ? 'disabled' : ''} title="Move down">▼</button>
+        </div>
+        <div class="instruction-info">
+          <div class="instruction-name">${escapeHtml(instruction.name)}</div>
+          <div class="instruction-prompt">${escapeHtml(instruction.prompt)}</div>
+        </div>
+        <div class="instruction-status">
+          ${statusBadge}
+          ${instruction.error_count > 0 ? `<span class="error-count" title="Total errors">${instruction.error_count}×</span>` : ''}
+        </div>
+        <div class="instruction-actions">
+          <label class="toggle-switch" title="${instruction.is_active ? 'Disable' : 'Enable'}">
+            <input type="checkbox" ${instruction.is_active ? 'checked' : ''} onchange="toggleInstruction(${instruction.id}, this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <button class="btn-icon" onclick="showEditInstructionModal(${instruction.id})" title="Edit">✏️</button>
+          <button class="btn-icon" onclick="regenerateInstruction(${instruction.id})" title="Regenerate script">🔄</button>
+          <button class="btn-icon btn-danger" onclick="confirmDeleteInstruction(${instruction.id})" title="Delete">🗑️</button>
+        </div>
+      </div>
+      ${hasError ? `
+        <div class="instruction-error">
+          <div class="error-label">Last Error (${instruction.last_error_at ? formatDateTime(instruction.last_error_at) : 'unknown'}):</div>
+          <pre class="error-message">${escapeHtml(instruction.last_error)}</pre>
+        </div>
+      ` : ''}
+      ${hasScript ? `
+        <details class="instruction-script">
+          <summary>View generated script</summary>
+          <pre><code>${escapeHtml(instruction.script)}</code></pre>
+        </details>
+      ` : ''}
+    </div>
+  `;
+}
+
+function showAddInstructionModal() {
+  if (!currentPage) return;
+
+  showModal('Add Instruction', `
+    <form class="modal-form" onsubmit="createInstruction(event)">
+      <div class="form-group">
+        <label for="instruction-name-input">Name</label>
+        <input type="text" id="instruction-name-input" placeholder="e.g., Open mobile menu" required>
+      </div>
+      <div class="form-group">
+        <label for="instruction-prompt-input">Instruction</label>
+        <textarea id="instruction-prompt-input" rows="4" placeholder="Describe what you want to do on the page, e.g., 'Click the hamburger menu icon to open the mobile navigation'" required></textarea>
+        <small class="form-help">Describe the action in plain English. AI will analyze the page and generate the script.</small>
+      </div>
+      <div class="form-group">
+        <label for="instruction-viewport-input">Viewport for analysis</label>
+        <select id="instruction-viewport-input">
+          <option value="desktop">Desktop (1920px)</option>
+          <option value="tablet">Tablet (768px)</option>
+          <option value="mobile">Mobile (375px)</option>
+        </select>
+        <small class="form-help">The viewport size used when AI analyzes the page to generate the script.</small>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="create-instruction-btn">
+          Create Instruction
+        </button>
+      </div>
+    </form>
+  `);
+}
+
+async function createInstruction(e) {
+  e.preventDefault();
+  if (!currentPage || isGeneratingScript) return;
+
+  const name = document.getElementById('instruction-name-input').value;
+  const prompt = document.getElementById('instruction-prompt-input').value;
+  const viewport = document.getElementById('instruction-viewport-input').value;
+  const submitBtn = document.getElementById('create-instruction-btn');
+
+  isGeneratingScript = true;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner-small"></span> Generating script...';
+
+  try {
+    const instruction = await api.createInstruction(currentPage.id, { name, prompt, viewport });
+    
+    closeModal();
+    
+    if (instruction.generationError) {
+      showToast('Instruction created but script generation failed: ' + instruction.generationError, 'error');
+    } else if (instruction.script) {
+      showToast('Instruction created with AI-generated script', 'success');
+    } else {
+      showToast('Instruction created', 'success');
+    }
+    
+    // Reload instructions
+    currentInstructions = await api.getInstructions(currentPage.id);
+    renderInstructions();
+  } catch (error) {
+    showToast('Failed to create instruction: ' + error.message, 'error');
+  } finally {
+    isGeneratingScript = false;
+  }
+}
+
+function showEditInstructionModal(instructionId) {
+  const instruction = currentInstructions.find(i => i.id === instructionId);
+  if (!instruction) return;
+
+  showModal('Edit Instruction', `
+    <form class="modal-form" onsubmit="updateInstruction(event, ${instructionId})">
+      <div class="form-group">
+        <label for="edit-instruction-name">Name</label>
+        <input type="text" id="edit-instruction-name" value="${escapeHtml(instruction.name)}" required>
+      </div>
+      <div class="form-group">
+        <label for="edit-instruction-prompt">Instruction</label>
+        <textarea id="edit-instruction-prompt" rows="4" required>${escapeHtml(instruction.prompt)}</textarea>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="edit-instruction-active" ${instruction.is_active ? 'checked' : ''}>
+          Active (execute before screenshots)
+        </label>
+      </div>
+      ${instruction.script ? `
+        <div class="form-group">
+          <label>Generated Script</label>
+          <textarea id="edit-instruction-script" rows="6" class="code-textarea">${escapeHtml(instruction.script)}</textarea>
+          <small class="form-help">You can manually edit the script if needed.</small>
+        </div>
+      ` : ''}
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  `);
+}
+
+async function updateInstruction(e, instructionId) {
+  e.preventDefault();
+  if (!currentPage) return;
+
+  const name = document.getElementById('edit-instruction-name').value;
+  const prompt = document.getElementById('edit-instruction-prompt').value;
+  const is_active = document.getElementById('edit-instruction-active').checked;
+  const scriptEl = document.getElementById('edit-instruction-script');
+  const script = scriptEl ? scriptEl.value : undefined;
+
+  try {
+    await api.updateInstruction(currentPage.id, instructionId, { name, prompt, is_active, script });
+    closeModal();
+    showToast('Instruction updated', 'success');
+    
+    // Reload instructions
+    currentInstructions = await api.getInstructions(currentPage.id);
+    renderInstructions();
+  } catch (error) {
+    showToast('Failed to update instruction: ' + error.message, 'error');
+  }
+}
+
+async function toggleInstruction(instructionId, isActive) {
+  if (!currentPage) return;
+
+  try {
+    await api.updateInstruction(currentPage.id, instructionId, { is_active: isActive });
+    
+    // Update local state
+    const instruction = currentInstructions.find(i => i.id === instructionId);
+    if (instruction) {
+      instruction.is_active = isActive;
+    }
+    
+    showToast(isActive ? 'Instruction enabled' : 'Instruction disabled', 'success');
+  } catch (error) {
+    showToast('Failed to update instruction: ' + error.message, 'error');
+    // Reload to restore correct state
+    currentInstructions = await api.getInstructions(currentPage.id);
+    renderInstructions();
+  }
+}
+
+async function regenerateInstruction(instructionId) {
+  if (!currentPage || isGeneratingScript) return;
+
+  const instruction = currentInstructions.find(i => i.id === instructionId);
+  if (!instruction) return;
+
+  isGeneratingScript = true;
+  showToast('Regenerating script...', 'info');
+
+  try {
+    const updated = await api.regenerateInstruction(currentPage.id, instructionId);
+    
+    // Update local state
+    const index = currentInstructions.findIndex(i => i.id === instructionId);
+    if (index !== -1) {
+      currentInstructions[index] = updated;
+    }
+    
+    renderInstructions();
+    showToast('Script regenerated successfully', 'success');
+  } catch (error) {
+    showToast('Failed to regenerate script: ' + error.message, 'error');
+  } finally {
+    isGeneratingScript = false;
+  }
+}
+
+function confirmDeleteInstruction(instructionId) {
+  const instruction = currentInstructions.find(i => i.id === instructionId);
+  if (!instruction) return;
+
+  showModal('Delete Instruction', `
+    <p>Are you sure you want to delete <strong>${escapeHtml(instruction.name)}</strong>?</p>
+    <div class="modal-actions" style="margin-top: 24px;">
+      <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button type="button" class="btn btn-danger" onclick="deleteInstruction(${instructionId})">Delete</button>
+    </div>
+  `);
+}
+
+async function deleteInstruction(instructionId) {
+  if (!currentPage) return;
+
+  try {
+    await api.deleteInstruction(currentPage.id, instructionId);
+    closeModal();
+    showToast('Instruction deleted', 'success');
+    
+    // Reload instructions
+    currentInstructions = await api.getInstructions(currentPage.id);
+    renderInstructions();
+  } catch (error) {
+    showToast('Failed to delete instruction: ' + error.message, 'error');
+  }
+}
+
+async function moveInstruction(instructionId, direction) {
+  if (!currentPage) return;
+
+  const index = currentInstructions.findIndex(i => i.id === instructionId);
+  if (index === -1) return;
+
+  const newIndex = direction === 'up' ? index - 1 : index + 1;
+  if (newIndex < 0 || newIndex >= currentInstructions.length) return;
+
+  // Swap positions in array
+  const instructionIds = currentInstructions.map(i => i.id);
+  [instructionIds[index], instructionIds[newIndex]] = [instructionIds[newIndex], instructionIds[index]];
+
+  try {
+    const reordered = await api.reorderInstructions(currentPage.id, instructionIds);
+    currentInstructions = reordered;
+    renderInstructions();
+  } catch (error) {
+    showToast('Failed to reorder instructions: ' + error.message, 'error');
+  }
+}
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
 
 // Utility functions
 function escapeHtml(text) {

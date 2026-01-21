@@ -172,6 +172,11 @@ class BrowserPool {
       waiting: this.waitingQueue.length
     };
   }
+
+  // Alias for API compatibility
+  getStatus() {
+    return this.getStats();
+  }
 }
 
 module.exports = BrowserPool;

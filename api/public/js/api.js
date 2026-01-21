@@ -161,6 +161,13 @@ class ApiClient {
     });
   }
 
+  async deleteScreenshotSet(ids) {
+    return this.request('/screenshots/batch', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids })
+    });
+  }
+
   getScreenshotImageUrl(id) {
     return `${API_BASE}/screenshots/${id}/image?token=${encodeURIComponent(this.token)}`;
   }
@@ -176,6 +183,45 @@ class ApiClient {
 
   async getComparisonStats(id1, id2) {
     return this.request(`/screenshots/${id1}/compare/${id2}/stats`);
+  }
+
+  // Instructions endpoints
+  async getInstructions(pageId) {
+    return this.request(`/pages/${pageId}/instructions`);
+  }
+
+  async createInstruction(pageId, { name, prompt, viewport }) {
+    return this.request(`/pages/${pageId}/instructions`, {
+      method: 'POST',
+      body: JSON.stringify({ name, prompt, viewport })
+    });
+  }
+
+  async updateInstruction(pageId, instructionId, data) {
+    return this.request(`/pages/${pageId}/instructions/${instructionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteInstruction(pageId, instructionId) {
+    return this.request(`/pages/${pageId}/instructions/${instructionId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async regenerateInstruction(pageId, instructionId, { viewport } = {}) {
+    return this.request(`/pages/${pageId}/instructions/${instructionId}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify({ viewport })
+    });
+  }
+
+  async reorderInstructions(pageId, instructionIds) {
+    return this.request(`/pages/${pageId}/instructions/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ instructionIds })
+    });
   }
 }
 

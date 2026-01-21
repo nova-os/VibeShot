@@ -70,7 +70,21 @@ class Scheduler {
     `);
     
     // Filter out pages already being processed
-    return pages.filter(page => !this.activeJobs.has(page.id));
+    const filteredPages = pages.filter(page => !this.activeJobs.has(page.id));
+    
+    // Fetch instructions for each page
+    for (const page of filteredPages) {
+      const [instructions] = await db.query(`
+        SELECT id, name, script, is_active
+        FROM instructions
+        WHERE page_id = ? AND is_active = TRUE AND script IS NOT NULL
+        ORDER BY execution_order ASC
+      `, [page.id]);
+      
+      page.instructions = instructions;
+    }
+    
+    return filteredPages;
   }
 
   async processPage(page) {
@@ -85,11 +99,16 @@ class Scheduler {
       
       try {
         // Capture screenshots for all viewports
-        const results = await captureScreenshots(browser, page);
+        const { screenshots, instructionResults } = await captureScreenshots(browser, page);
         
         // Save all screenshots to database
-        for (const result of results) {
+        for (const result of screenshots) {
           await this.saveScreenshot(page.id, result);
+        }
+        
+        // Save instruction execution results (errors and successes)
+        if (instructionResults && instructionResults.length > 0) {
+          await this.saveInstructionResults(instructionResults);
         }
         
         // Update last_screenshot_at
@@ -98,7 +117,7 @@ class Scheduler {
           [page.id]
         );
 
-        console.log(`Scheduler: Successfully captured ${results.length} viewports for page ${page.id}`);
+        console.log(`Scheduler: Successfully captured ${screenshots.length} viewports for page ${page.id}`);
         
       } finally {
         // Always release browser back to pool
@@ -119,6 +138,38 @@ class Scheduler {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [pageId, result.viewport, result.viewportWidth, result.filePath, result.thumbnailPath, result.fileSize, result.width, result.height]
     );
+  }
+
+  async saveInstructionResults(results) {
+    for (const result of results) {
+      try {
+        if (result.success) {
+          // Clear error and update success timestamp
+          await db.query(
+            `UPDATE instructions 
+             SET last_error = NULL, 
+                 last_success_at = NOW(),
+                 error_count = 0
+             WHERE id = ?`,
+            [result.instructionId]
+          );
+          console.log(`Scheduler: Instruction ${result.instructionId} (${result.name}) executed successfully`);
+        } else {
+          // Log the error
+          await db.query(
+            `UPDATE instructions 
+             SET last_error = ?, 
+                 last_error_at = NOW(),
+                 error_count = error_count + 1
+             WHERE id = ?`,
+            [result.error, result.instructionId]
+          );
+          console.log(`Scheduler: Instruction ${result.instructionId} (${result.name}) failed: ${result.error}`);
+        }
+      } catch (dbError) {
+        console.error(`Scheduler: Failed to save instruction result for ${result.instructionId}:`, dbError.message);
+      }
+    }
   }
 }
 

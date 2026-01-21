@@ -12,6 +12,63 @@ const router = express.Router();
 // All routes require authentication
 router.use(authenticateToken);
 
+// Delete multiple screenshots (screenshot set) - must be before /:id routes
+router.delete('/batch', async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+
+    // Verify ownership of all screenshots
+    const placeholders = ids.map(() => '?').join(',');
+    const [screenshots] = await db.query(
+      `SELECT sc.* FROM screenshots sc
+       JOIN pages p ON sc.page_id = p.id
+       JOIN sites s ON p.site_id = s.id
+       WHERE sc.id IN (${placeholders}) AND s.user_id = ?`,
+      [...ids, req.user.id]
+    );
+
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: 'No screenshots found' });
+    }
+
+    // Delete files for each screenshot
+    for (const screenshot of screenshots) {
+      const screenshotPath = path.join(__dirname, '../../screenshots', screenshot.file_path);
+      try {
+        await fs.unlink(screenshotPath);
+      } catch (err) {
+        console.warn('Could not delete screenshot file:', err.message);
+      }
+
+      if (screenshot.thumbnail_path) {
+        const thumbnailPath = path.join(__dirname, '../../screenshots', screenshot.thumbnail_path);
+        try {
+          await fs.unlink(thumbnailPath);
+        } catch (err) {
+          console.warn('Could not delete thumbnail file:', err.message);
+        }
+      }
+    }
+
+    // Delete database records
+    const deletedIds = screenshots.map(s => s.id);
+    const deletePlaceholders = deletedIds.map(() => '?').join(',');
+    await db.query(`DELETE FROM screenshots WHERE id IN (${deletePlaceholders})`, deletedIds);
+
+    res.json({ 
+      message: 'Screenshots deleted successfully',
+      deletedCount: deletedIds.length
+    });
+  } catch (error) {
+    console.error('Delete screenshots batch error:', error);
+    res.status(500).json({ error: 'Failed to delete screenshots' });
+  }
+});
+
 // Get screenshot metadata
 router.get('/:id', async (req, res) => {
   try {

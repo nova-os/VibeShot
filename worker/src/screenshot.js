@@ -27,22 +27,81 @@ const VIEWPORTS = {
 /**
  * Capture screenshots for all viewports
  * @param {Browser} browser - Puppeteer browser instance
- * @param {Object} page - Page object from database
- * @returns {Array} Array of screenshot results for each viewport
+ * @param {Object} page - Page object from database (includes instructions array)
+ * @returns {Object} Object containing screenshot results and instruction execution results
  */
 async function captureScreenshots(browser, page) {
-  const results = [];
+  const screenshotResults = [];
+  const instructionResults = [];
   
   for (const [viewportKey, viewport] of Object.entries(VIEWPORTS)) {
     try {
       console.log(`Screenshot: Capturing ${viewport.name} viewport (${viewport.width}px) for ${page.url}`);
-      const result = await captureScreenshotForViewport(browser, page, viewport);
-      results.push(result);
+      const { screenshot, instructions } = await captureScreenshotForViewport(browser, page, viewport);
+      screenshotResults.push(screenshot);
+      
+      // Collect instruction results (only from first viewport to avoid duplicates)
+      if (viewportKey === 'mobile' && instructions) {
+        instructionResults.push(...instructions);
+      }
     } catch (error) {
       console.error(`Screenshot: Failed to capture ${viewport.name} viewport:`, error.message);
       // Continue with other viewports even if one fails
     }
   }
+  
+  return { screenshots: screenshotResults, instructionResults };
+}
+
+/**
+ * Execute AI-generated instructions on the page
+ * @param {Page} browserPage - Puppeteer page instance
+ * @param {Array} instructions - Array of instruction objects with script property
+ * @param {string} viewportName - Current viewport name for logging
+ * @returns {Array} Array of execution results with success/error status for each instruction
+ */
+async function executeInstructions(browserPage, instructions, viewportName) {
+  const results = [];
+  
+  if (!instructions || instructions.length === 0) {
+    return results;
+  }
+
+  const activeInstructions = instructions.filter(i => i.is_active && i.script);
+  
+  if (activeInstructions.length === 0) {
+    return results;
+  }
+
+  console.log(`Screenshot: Executing ${activeInstructions.length} instruction(s) (${viewportName})`);
+
+  for (const instruction of activeInstructions) {
+    const result = {
+      instructionId: instruction.id,
+      name: instruction.name,
+      success: false,
+      error: null
+    };
+    
+    try {
+      console.log(`Screenshot: Running instruction "${instruction.name}" (${viewportName})`);
+      await browserPage.evaluate(instruction.script);
+      // Wait for DOM updates after each instruction
+      await sleep(500);
+      console.log(`Screenshot: Instruction "${instruction.name}" completed (${viewportName})`);
+      result.success = true;
+    } catch (error) {
+      const errorMessage = error.message || String(error);
+      console.error(`Screenshot: Instruction "${instruction.name}" failed (${viewportName}):`, errorMessage);
+      result.error = errorMessage;
+      // Continue with other instructions even if one fails
+    }
+    
+    results.push(result);
+  }
+
+  // Wait a bit more after all instructions for any animations/transitions
+  await sleep(500);
   
   return results;
 }
@@ -117,6 +176,12 @@ async function captureScreenshotForViewport(browser, page, viewport) {
     
     // Wait after dismissing consent
     await sleep(500);
+
+    // Execute AI-generated instructions (if any)
+    let instructionResults = [];
+    if (page.instructions && page.instructions.length > 0) {
+      instructionResults = await executeInstructions(browserPage, page.instructions, viewport.name);
+    }
 
     // Scroll through entire page to trigger lazy loading
     console.log(`Screenshot: Scrolling to load lazy content... (${viewport.name})`);
@@ -194,13 +259,16 @@ async function captureScreenshotForViewport(browser, page, viewport) {
     console.log(`Screenshot: Saved to ${relativeFilePath}`);
 
     return {
-      viewport: viewport.name,
-      viewportWidth: viewport.width,
-      filePath: relativeFilePath,
-      thumbnailPath: relativeThumbnailPath,
-      fileSize: stats.size,
-      width: metadata.width,
-      height: metadata.height
+      screenshot: {
+        viewport: viewport.name,
+        viewportWidth: viewport.width,
+        filePath: relativeFilePath,
+        thumbnailPath: relativeThumbnailPath,
+        fileSize: stats.size,
+        width: metadata.width,
+        height: metadata.height
+      },
+      instructions: instructionResults
     };
 
   } finally {
@@ -302,17 +370,36 @@ async function dismissCookieConsent(page) {
       for (const frame of frames) {
         if (frame === page.mainFrame()) continue;
         
+        // Get frame URL to identify consent management platforms
+        const frameUrl = frame.url() || '';
+        const isConsentFrame = frameUrl.includes('cmp.') || 
+                               frameUrl.includes('consent') ||
+                               frameUrl.includes('sourcepoint') ||
+                               frameUrl.includes('privacy') ||
+                               frameUrl.includes('gdpr') ||
+                               frameUrl.includes('cookie');
+        
         try {
           const frameClicked = await Promise.race([
-            frame.evaluate(() => {
+            frame.evaluate((isConsentFrame) => {
               // More specific patterns first, avoid false positives
               const acceptPatterns = [
                 'ich akzeptiere alle', 'alle akzeptieren', 'einwilligung speichern',
                 'accept all', 'accept cookies', 'allow all', 'i agree',
-                'zustimmen', 'einverstanden', 'verstanden', 'got it'
+                'zustimmen', 'einverstanden', 'verstanden', 'got it', 'agree'
               ];
               
-              const buttons = [...document.querySelectorAll('button, [role="button"], a.button, .btn')];
+              // For consent frames, also try specific selectors
+              if (isConsentFrame) {
+                // Sourcepoint specific selectors
+                const sourcepointBtn = document.querySelector('button[title="Zustimmen"], button[title="Agree"], button[title="Accept all"], .sp_choice_type_11');
+                if (sourcepointBtn) {
+                  sourcepointBtn.click();
+                  return true;
+                }
+              }
+              
+              const buttons = [...document.querySelectorAll('button, [role="button"], a.button, .btn, [class*="button"]')];
               for (const acceptText of acceptPatterns) {
                 for (const button of buttons) {
                   const text = (button.textContent || '').toLowerCase().trim();
@@ -328,9 +415,9 @@ async function dismissCookieConsent(page) {
                 }
               }
               return false;
-            }),
-            // Timeout after 2 seconds per frame
-            new Promise(resolve => setTimeout(() => resolve(false), 2000))
+            }, isConsentFrame),
+            // Timeout after 3 seconds per frame
+            new Promise(resolve => setTimeout(() => resolve(false), 3000))
           ]);
           
           if (frameClicked) {
@@ -548,4 +635,4 @@ async function autoScroll(page) {
 }
 
 // Export the new function and keep backward compatibility
-module.exports = { captureScreenshots, captureScreenshotForViewport, VIEWPORTS };
+module.exports = { captureScreenshots, captureScreenshotForViewport, executeInstructions, VIEWPORTS };
