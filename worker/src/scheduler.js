@@ -3,6 +3,10 @@ const { captureScreenshots } = require('./screenshot');
 
 const POLL_INTERVAL = 60000; // 60 seconds
 
+// Default settings (fallback when no user settings exist)
+const DEFAULT_INTERVAL_MINUTES = 1440; // 24 hours
+const DEFAULT_VIEWPORTS = '[1920, 768, 375]';
+
 class Scheduler {
   constructor(browserPool) {
     this.browserPool = browserPool;
@@ -57,22 +61,26 @@ class Scheduler {
 
   async getPagesNeedingCapture() {
     const [pages] = await db.query(`
-      SELECT p.id, p.url, p.name, p.interval_minutes, p.last_screenshot_at,
-             s.name as site_name, s.domain as site_domain
+      SELECT p.id, p.url, p.name, p.last_screenshot_at,
+             s.name as site_name, s.domain as site_domain,
+             COALESCE(p.interval_minutes, us.default_interval_minutes, ?) as effective_interval,
+             COALESCE(p.viewports, us.default_viewports, ?) as effective_viewports
       FROM pages p
       JOIN sites s ON p.site_id = s.id
+      LEFT JOIN user_settings us ON s.user_id = us.user_id
       WHERE p.is_active = TRUE
         AND (
           p.last_screenshot_at IS NULL
-          OR TIMESTAMPDIFF(MINUTE, p.last_screenshot_at, NOW()) >= p.interval_minutes
+          OR TIMESTAMPDIFF(MINUTE, p.last_screenshot_at, NOW()) >= 
+             COALESCE(p.interval_minutes, us.default_interval_minutes, ?)
         )
       ORDER BY p.last_screenshot_at ASC
-    `);
+    `, [DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS, DEFAULT_INTERVAL_MINUTES]);
     
     // Filter out pages already being processed
     const filteredPages = pages.filter(page => !this.activeJobs.has(page.id));
     
-    // Fetch instructions for each page
+    // Fetch instructions for each page and parse viewports
     for (const page of filteredPages) {
       const [instructions] = await db.query(`
         SELECT id, name, script, is_active
@@ -82,6 +90,11 @@ class Scheduler {
       `, [page.id]);
       
       page.instructions = instructions;
+      
+      // Parse viewports JSON if it's a string
+      if (typeof page.effective_viewports === 'string') {
+        page.effective_viewports = JSON.parse(page.effective_viewports);
+      }
     }
     
     return filteredPages;

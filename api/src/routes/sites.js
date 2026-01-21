@@ -143,6 +143,13 @@ router.get('/:id/pages', async (req, res) => {
       [req.params.id]
     );
 
+    // Parse viewports JSON for each page
+    for (const page of pages) {
+      if (page.viewports && typeof page.viewports === 'string') {
+        page.viewports = JSON.parse(page.viewports);
+      }
+    }
+
     res.json(pages);
   } catch (error) {
     console.error('Get pages error:', error);
@@ -214,16 +221,16 @@ router.post('/:id/pages/bulk', async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    // Insert all pages
+    // Insert all pages (interval_minutes and viewports are null by default - uses user settings)
     const createdPages = [];
     for (const page of pages) {
-      const { url, name, interval_minutes = 360 } = page;
+      const { url, name, interval_minutes = null, viewports = null } = page;
       
       if (!url || !name) continue;
 
       const [result] = await db.query(
-        'INSERT INTO pages (site_id, url, name, interval_minutes) VALUES (?, ?, ?, ?)',
-        [req.params.id, url, name, interval_minutes]
+        'INSERT INTO pages (site_id, url, name, interval_minutes, viewports) VALUES (?, ?, ?, ?, ?)',
+        [req.params.id, url, name, interval_minutes, viewports ? JSON.stringify(viewports) : null]
       );
 
       const [newPages] = await db.query('SELECT * FROM pages WHERE id = ?', [result.insertId]);
@@ -245,7 +252,7 @@ router.post('/:id/pages/bulk', async (req, res) => {
 // Create page for a site
 router.post('/:id/pages', async (req, res) => {
   try {
-    const { url, name, interval_minutes = 360 } = req.body;
+    const { url, name, interval_minutes = null, viewports = null } = req.body;
 
     if (!url || !name) {
       return res.status(400).json({ error: 'URL and name are required' });
@@ -262,8 +269,8 @@ router.post('/:id/pages', async (req, res) => {
     }
 
     const [result] = await db.query(
-      'INSERT INTO pages (site_id, url, name, interval_minutes) VALUES (?, ?, ?, ?)',
-      [req.params.id, url, name, interval_minutes]
+      'INSERT INTO pages (site_id, url, name, interval_minutes, viewports) VALUES (?, ?, ?, ?, ?)',
+      [req.params.id, url, name, interval_minutes, viewports ? JSON.stringify(viewports) : null]
     );
 
     const [pages] = await db.query('SELECT * FROM pages WHERE id = ?', [result.insertId]);

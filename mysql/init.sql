@@ -9,6 +9,17 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- User settings table (default capture settings)
+CREATE TABLE IF NOT EXISTS user_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL UNIQUE,
+    default_interval_minutes INT NOT NULL DEFAULT 1440,
+    default_viewports JSON NOT NULL DEFAULT '[1920, 768, 375]',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Sites table
 CREATE TABLE IF NOT EXISTS sites (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -26,7 +37,8 @@ CREATE TABLE IF NOT EXISTS pages (
     site_id INT NOT NULL,
     url VARCHAR(2048) NOT NULL,
     name VARCHAR(255) NOT NULL,
-    interval_minutes INT NOT NULL DEFAULT 360,
+    interval_minutes INT NULL,
+    viewports JSON NULL,
     last_screenshot_at TIMESTAMP NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

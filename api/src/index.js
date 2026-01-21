@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const sitesRoutes = require('./routes/sites');
 const pagesRoutes = require('./routes/pages');
 const screenshotsRoutes = require('./routes/screenshots');
+const settingsRoutes = require('./routes/settings');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +28,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/sites', sitesRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/screenshots', screenshotsRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Serve screenshots
 app.use('/screenshots', express.static(path.join(__dirname, '../screenshots')));

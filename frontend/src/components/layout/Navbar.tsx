@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 
 export function Navbar() {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
 
   const initials = user?.email
     ? user.email
@@ -54,6 +55,11 @@ export function Navbar() {
                   </p>
                 </div>
               </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate('/settings')} className="cursor-pointer">
+                <Icon name="settings" size="sm" className="mr-2" />
+                Settings
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout} className="text-destructive cursor-pointer">
                 <Icon name="logout" size="sm" className="mr-2" />

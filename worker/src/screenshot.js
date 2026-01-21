@@ -5,47 +5,70 @@ const sharp = require('sharp');
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/app/screenshots';
 const THUMBNAIL_WIDTH = 400;
 
-// Viewport configurations from environment variables
-const VIEWPORTS = {
-  mobile: {
-    name: 'mobile',
-    width: parseInt(process.env.VIEWPORT_MOBILE) || 375,
-    height: 812
-  },
-  tablet: {
-    name: 'tablet',
-    width: parseInt(process.env.VIEWPORT_TABLET) || 768,
-    height: 1024
-  },
-  desktop: {
-    name: 'desktop',
-    width: parseInt(process.env.VIEWPORT_DESKTOP) || 1920,
-    height: 1080
+// Default viewports (fallback when no user settings exist)
+const DEFAULT_VIEWPORTS = [1920, 768, 375];
+
+/**
+ * Get viewport category name based on width
+ * @param {number} width - Viewport width in pixels
+ * @returns {string} Viewport category name
+ */
+function getViewportName(width) {
+  if (width <= 480) return 'mobile';
+  if (width <= 1024) return 'tablet';
+  return 'desktop';
+}
+
+/**
+ * Get viewport height based on category
+ * @param {string} name - Viewport category name
+ * @returns {number} Viewport height
+ */
+function getViewportHeight(name) {
+  switch (name) {
+    case 'mobile': return 812;
+    case 'tablet': return 1024;
+    default: return 1080;
   }
-};
+}
 
 /**
  * Capture screenshots for all viewports
  * @param {Browser} browser - Puppeteer browser instance
- * @param {Object} page - Page object from database (includes instructions array)
+ * @param {Object} page - Page object from database (includes instructions array and effective_viewports)
  * @returns {Object} Object containing screenshot results and instruction execution results
  */
 async function captureScreenshots(browser, page) {
   const screenshotResults = [];
   const instructionResults = [];
   
-  for (const [viewportKey, viewport] of Object.entries(VIEWPORTS)) {
+  // Get viewports from page settings (effective_viewports is resolved by scheduler)
+  const viewportWidths = page.effective_viewports || DEFAULT_VIEWPORTS;
+  
+  // Sort widths descending (desktop first) for consistent ordering
+  const sortedWidths = [...viewportWidths].sort((a, b) => b - a);
+  
+  let isFirstViewport = true;
+  for (const width of sortedWidths) {
+    const viewportName = getViewportName(width);
+    const viewport = {
+      name: viewportName,
+      width: width,
+      height: getViewportHeight(viewportName)
+    };
+    
     try {
       console.log(`Screenshot: Capturing ${viewport.name} viewport (${viewport.width}px) for ${page.url}`);
       const { screenshot, instructions } = await captureScreenshotForViewport(browser, page, viewport);
       screenshotResults.push(screenshot);
       
       // Collect instruction results (only from first viewport to avoid duplicates)
-      if (viewportKey === 'mobile' && instructions) {
+      if (isFirstViewport && instructions) {
         instructionResults.push(...instructions);
       }
+      isFirstViewport = false;
     } catch (error) {
-      console.error(`Screenshot: Failed to capture ${viewport.name} viewport:`, error.message);
+      console.error(`Screenshot: Failed to capture ${viewport.name} viewport (${width}px):`, error.message);
       // Continue with other viewports even if one fails
     }
   }
@@ -634,5 +657,5 @@ async function autoScroll(page) {
   });
 }
 
-// Export the new function and keep backward compatibility
-module.exports = { captureScreenshots, captureScreenshotForViewport, executeInstructions, VIEWPORTS };
+// Export functions
+module.exports = { captureScreenshots, captureScreenshotForViewport, executeInstructions, getViewportName, DEFAULT_VIEWPORTS };

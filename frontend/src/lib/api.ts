@@ -20,12 +20,18 @@ export interface Page {
   site_id: number
   name: string
   url: string
-  interval_minutes: number
+  interval_minutes: number | null
+  viewports: number[] | null
   is_active: boolean
   last_screenshot_at: string | null
   created_at: string
   screenshot_count?: number
   latest_screenshot?: string | null
+}
+
+export interface UserSettings {
+  default_interval_minutes: number
+  default_viewports: number[]
 }
 
 export interface Screenshot {
@@ -171,6 +177,18 @@ class ApiClient {
     return this.request<User>('/auth/me')
   }
 
+  // Settings endpoints
+  async getSettings(): Promise<UserSettings> {
+    return this.request<UserSettings>('/settings')
+  }
+
+  async updateSettings(data: Partial<UserSettings>): Promise<UserSettings> {
+    return this.request<UserSettings>('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
   // Sites endpoints
   async getSites(): Promise<Site[]> {
     return this.request<Site[]>('/sites')
@@ -209,7 +227,7 @@ class ApiClient {
     return this.request<Page>(`/pages/${id}`)
   }
 
-  async createPage(siteId: number, data: Pick<Page, 'name' | 'url' | 'interval_minutes'>): Promise<Page> {
+  async createPage(siteId: number, data: { name: string; url: string; interval_minutes?: number | null; viewports?: number[] | null }): Promise<Page> {
     return this.request<Page>(`/sites/${siteId}/pages`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -225,7 +243,7 @@ class ApiClient {
 
   async bulkCreatePages(
     siteId: number,
-    pages: Array<{ url: string; name: string; interval_minutes?: number }>
+    pages: Array<{ url: string; name: string; interval_minutes?: number | null; viewports?: number[] | null }>
   ): Promise<BulkCreatePagesResponse> {
     return this.request<BulkCreatePagesResponse>(`/sites/${siteId}/pages/bulk`, {
       method: 'POST',
@@ -235,7 +253,7 @@ class ApiClient {
 
   async updatePage(
     id: number,
-    data: Partial<Pick<Page, 'name' | 'url' | 'interval_minutes' | 'is_active'>>
+    data: Partial<Pick<Page, 'name' | 'url' | 'interval_minutes' | 'viewports' | 'is_active'>>
   ): Promise<Page> {
     return this.request<Page>(`/pages/${id}`, {
       method: 'PUT',

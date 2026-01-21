@@ -7,6 +7,7 @@ import { AuthPage } from '@/pages/AuthPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { SiteDetailPage } from '@/pages/SiteDetailPage'
 import { ScreenshotsPage } from '@/pages/ScreenshotsPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/sites/:siteId" element={<SiteDetailPage />} />
             <Route path="/sites/:siteId/pages/:pageId" element={<ScreenshotsPage />} />
           </Route>

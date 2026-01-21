@@ -45,7 +45,13 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    res.json(pages[0]);
+    const page = pages[0];
+    // Parse viewports if it's a string
+    if (page.viewports && typeof page.viewports === 'string') {
+      page.viewports = JSON.parse(page.viewports);
+    }
+
+    res.json(page);
   } catch (error) {
     console.error('Get page error:', error);
     res.status(500).json({ error: 'Failed to get page' });
@@ -55,7 +61,7 @@ router.get('/:id', async (req, res) => {
 // Update page
 router.put('/:id', async (req, res) => {
   try {
-    const { url, name, interval_minutes, is_active } = req.body;
+    const { url, name, interval_minutes, viewports, is_active } = req.body;
 
     // Verify ownership
     const [existing] = await db.query(
@@ -69,18 +75,50 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    await db.query(
-      `UPDATE pages SET 
-        url = COALESCE(?, url),
-        name = COALESCE(?, name),
-        interval_minutes = COALESCE(?, interval_minutes),
-        is_active = COALESCE(?, is_active)
-       WHERE id = ?`,
-      [url, name, interval_minutes, is_active, req.params.id]
-    );
+    // Build dynamic update query to handle null values explicitly
+    const updates = [];
+    const values = [];
+
+    if (url !== undefined) {
+      updates.push('url = ?');
+      values.push(url);
+    }
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    // interval_minutes can be null (use defaults) or a number
+    if (interval_minutes !== undefined) {
+      updates.push('interval_minutes = ?');
+      values.push(interval_minutes);
+    }
+    // viewports can be null (use defaults) or an array
+    if (viewports !== undefined) {
+      updates.push('viewports = ?');
+      values.push(viewports ? JSON.stringify(viewports) : null);
+    }
+    if (is_active !== undefined) {
+      updates.push('is_active = ?');
+      values.push(is_active);
+    }
+
+    if (updates.length > 0) {
+      values.push(req.params.id);
+      await db.query(
+        `UPDATE pages SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+    }
 
     const [pages] = await db.query('SELECT * FROM pages WHERE id = ?', [req.params.id]);
-    res.json(pages[0]);
+    
+    // Parse viewports if it's a string
+    const page = pages[0];
+    if (page.viewports && typeof page.viewports === 'string') {
+      page.viewports = JSON.parse(page.viewports);
+    }
+    
+    res.json(page);
   } catch (error) {
     console.error('Update page error:', error);
     res.status(500).json({ error: 'Failed to update page' });
