@@ -2,7 +2,7 @@ const db = require('./config/database');
 const { captureScreenshots } = require('./screenshot');
 const { runCleanup } = require('./cleanup');
 
-const POLL_INTERVAL = 60000; // 60 seconds
+const POLL_INTERVAL = 10000; // 60 seconds
 const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 // Default settings (fallback when no user settings exist)

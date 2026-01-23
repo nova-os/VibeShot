@@ -217,38 +217,11 @@ async function captureScreenshotForViewport(browser, page, viewport) {
     await browserPage.evaluate(() => window.scrollTo(0, 0));
     await sleep(500);
 
-    // Get the full page dimensions
-    const bodyHandle = await browserPage.$('body');
-    const boundingBox = await bodyHandle.boundingBox();
-    await bodyHandle.dispose();
-
-    // Get full document height (more reliable than bounding box)
-    const pageHeight = await browserPage.evaluate(() => {
-      return Math.max(
-        document.body.scrollHeight,
-        document.body.offsetHeight,
-        document.documentElement.clientHeight,
-        document.documentElement.scrollHeight,
-        document.documentElement.offsetHeight
-      );
-    });
-
-    const pageWidth = await browserPage.evaluate(() => {
-      return Math.max(
-        document.body.scrollWidth,
-        document.body.offsetWidth,
-        document.documentElement.clientWidth,
-        document.documentElement.scrollWidth,
-        document.documentElement.offsetWidth
-      );
-    });
-
-    console.log(`Screenshot: Page dimensions: ${pageWidth}x${pageHeight} (${viewport.name})`);
-
+    console.log(`Screenshot: Setting viewport to ${viewport.width}x${viewport.height} (${viewport.name})`);
     // Resize viewport to full page size for capture
     await browserPage.setViewport({
-      width: Math.min(pageWidth, viewport.width),
-      height: pageHeight,
+      width: viewport.width,
+      height: viewport.height,
       deviceScaleFactor: 1
     });
 
@@ -633,8 +606,9 @@ async function autoScroll(page) {
       const scrollDelay = 100; // Delay between scrolls (ms)
       let totalHeight = 0;
       let currentScroll = 0;
-      
-      const timer = setInterval(() => {
+
+      let timer = null;
+      timer = setInterval(() => {
         const scrollHeight = document.body.scrollHeight;
         
         window.scrollBy(0, scrollStep);
