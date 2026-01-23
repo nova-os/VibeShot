@@ -308,20 +308,32 @@ router.get('/:id/screenshots', async (req, res) => {
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    // Build query with optional viewport filter
-    let screenshotsQuery = `SELECT * FROM screenshots WHERE page_id = ?`;
+    // Build query with optional viewport filter (includes error counts)
+    let screenshotsQuery = `
+      SELECT s.*, 
+             COALESCE(error_counts.js_error_count, 0) as js_error_count,
+             COALESCE(error_counts.network_error_count, 0) as network_error_count
+      FROM screenshots s
+      LEFT JOIN (
+        SELECT screenshot_id,
+               SUM(CASE WHEN error_type = 'js' THEN 1 ELSE 0 END) as js_error_count,
+               SUM(CASE WHEN error_type = 'network' THEN 1 ELSE 0 END) as network_error_count
+        FROM screenshot_errors
+        GROUP BY screenshot_id
+      ) error_counts ON s.id = error_counts.screenshot_id
+      WHERE s.page_id = ?`;
     let countQuery = `SELECT COUNT(*) as total FROM screenshots WHERE page_id = ?`;
     const queryParams = [req.params.id];
     const countParams = [req.params.id];
 
     if (viewport) {
-      screenshotsQuery += ` AND viewport = ?`;
+      screenshotsQuery += ` AND s.viewport = ?`;
       countQuery += ` AND viewport = ?`;
       queryParams.push(viewport);
       countParams.push(viewport);
     }
 
-    screenshotsQuery += ` ORDER BY created_at DESC, viewport ASC LIMIT ? OFFSET ?`;
+    screenshotsQuery += ` ORDER BY s.created_at DESC, s.viewport ASC LIMIT ? OFFSET ?`;
     queryParams.push(limit, offset);
 
     const [screenshots] = await db.query(screenshotsQuery, queryParams);

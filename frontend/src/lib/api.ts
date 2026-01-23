@@ -55,6 +55,35 @@ export interface Screenshot {
   viewport: 'desktop' | 'tablet' | 'mobile' | null
   viewport_width: number | null
   created_at: string
+  // Error counts (from screenshot_errors table)
+  js_error_count?: number
+  network_error_count?: number
+}
+
+export interface JsError {
+  id: number
+  message: string
+  source: string | null
+  lineNumber: number | null
+  columnNumber: number | null
+  stack: string | null
+  createdAt: string
+}
+
+export interface NetworkError {
+  id: number
+  message: string
+  requestUrl: string | null
+  requestMethod: string | null
+  statusCode: number | null
+  resourceType: string | null
+  createdAt: string
+}
+
+export interface ScreenshotErrorsResponse {
+  jsErrors: JsError[]
+  networkErrors: NetworkError[]
+  totalErrors: number
 }
 
 export interface Instruction {
@@ -343,6 +372,10 @@ class ApiClient {
 
   async getScreenshot(id: number): Promise<Screenshot> {
     return this.request<Screenshot>(`/screenshots/${id}`)
+  }
+
+  async getScreenshotErrors(id: number): Promise<ScreenshotErrorsResponse> {
+    return this.request<ScreenshotErrorsResponse>(`/screenshots/${id}/errors`)
   }
 
   async deleteScreenshot(id: number): Promise<void> {

@@ -265,9 +265,14 @@ class Scheduler {
           onProgress
         );
         
-        // Save all screenshots to database
+        // Save all screenshots to database (including errors)
         for (const result of screenshots) {
-          await this.saveScreenshot(page.id, result);
+          const screenshotId = await this.saveScreenshot(page.id, result);
+          
+          // Save any captured errors
+          if (result.errors && result.errors.length > 0) {
+            await this.saveScreenshotErrors(screenshotId, result.errors);
+          }
         }
         
         // Save instruction execution results (errors and successes)
@@ -328,11 +333,54 @@ class Scheduler {
   }
 
   async saveScreenshot(pageId, result) {
-    await db.query(
+    const [insertResult] = await db.query(
       `INSERT INTO screenshots (page_id, viewport, viewport_width, file_path, thumbnail_path, file_size, width, height)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [pageId, result.viewport, result.viewportWidth, result.filePath, result.thumbnailPath, result.fileSize, result.width, result.height]
     );
+    return insertResult.insertId;
+  }
+
+  async saveScreenshotErrors(screenshotId, errors) {
+    if (!errors || errors.length === 0) return;
+    
+    for (const error of errors) {
+      try {
+        if (error.type === 'js') {
+          await db.query(
+            `INSERT INTO screenshot_errors 
+             (screenshot_id, error_type, message, source, line_number, column_number, stack)
+             VALUES (?, 'js', ?, ?, ?, ?, ?)`,
+            [
+              screenshotId,
+              error.message,
+              error.source,
+              error.lineNumber,
+              error.columnNumber,
+              error.stack
+            ]
+          );
+        } else if (error.type === 'network') {
+          await db.query(
+            `INSERT INTO screenshot_errors 
+             (screenshot_id, error_type, message, request_url, request_method, status_code, resource_type)
+             VALUES (?, 'network', ?, ?, ?, ?, ?)`,
+            [
+              screenshotId,
+              error.message,
+              error.requestUrl,
+              error.requestMethod,
+              error.statusCode,
+              error.resourceType
+            ]
+          );
+        }
+      } catch (dbError) {
+        console.error(`Scheduler: Failed to save screenshot error:`, dbError.message);
+      }
+    }
+    
+    console.log(`Scheduler: Saved ${errors.length} error(s) for screenshot ${screenshotId}`);
   }
 
   async saveInstructionResults(results) {

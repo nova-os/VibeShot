@@ -31,7 +31,14 @@ export function SiteDetailPage() {
 
   // Capture job tracking
   const [captureJobs, setCaptureJobs] = useState<Map<number, CaptureJob>>(new Map())
+  const captureJobsRef = useRef<Map<number, CaptureJob>>(new Map())
   const capturePollingRef = useRef<NodeJS.Timeout | null>(null)
+  const captureStatusLoadedRef = useRef(false)
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    captureJobsRef.current = captureJobs
+  }, [captureJobs])
 
   const loadData = useCallback(async () => {
     if (!siteId) return
@@ -56,7 +63,9 @@ export function SiteDetailPage() {
 
   // Poll capture status for pages with active jobs
   const pollCaptureStatus = useCallback(async () => {
-    const activePageIds = Array.from(captureJobs.entries())
+    // Read from ref to avoid dependency on captureJobs state
+    const currentJobs = captureJobsRef.current
+    const activePageIds = Array.from(currentJobs.entries())
       .filter(([, job]) => job.status === 'pending' || job.status === 'capturing')
       .map(([pageId]) => pageId)
     
@@ -76,37 +85,43 @@ export function SiteDetailPage() {
     
     const results = await Promise.allSettled(statusPromises)
     
+    // Check if any jobs completed before updating state
+    const completedJobs: number[] = []
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value.job) {
+        const { job, pageId } = result.value
+        if (job.status === 'completed' || job.status === 'failed') {
+          completedJobs.push(pageId)
+        }
+      }
+    }
+    
     setCaptureJobs(prev => {
       const next = new Map(prev)
-      let hasCompletedJobs = false
       
       for (const result of results) {
         if (result.status === 'fulfilled' && result.value.job) {
           const { pageId, job } = result.value
           next.set(pageId, job)
-          
-          // Check if job just completed
-          if (job.status === 'completed' || job.status === 'failed') {
-            hasCompletedJobs = true
-          }
         }
-      }
-      
-      // Reload page data if any jobs completed
-      if (hasCompletedJobs) {
-        loadData()
       }
       
       return next
     })
-  }, [captureJobs, loadData])
+    
+    // Reload page data if any jobs completed
+    if (completedJobs.length > 0) {
+      loadData()
+    }
+  }, [loadData])
+
+  // Derived state: whether there are active capture jobs
+  const hasActiveJobs = Array.from(captureJobs.values()).some(
+    job => job.status === 'pending' || job.status === 'capturing'
+  )
 
   // Start/stop capture status polling based on active jobs
   useEffect(() => {
-    const hasActiveJobs = Array.from(captureJobs.values()).some(
-      job => job.status === 'pending' || job.status === 'capturing'
-    )
-
     if (hasActiveJobs && !capturePollingRef.current) {
       // Start polling every 2 seconds
       pollCaptureStatus()
@@ -123,11 +138,14 @@ export function SiteDetailPage() {
         capturePollingRef.current = null
       }
     }
-  }, [captureJobs, pollCaptureStatus])
+  }, [hasActiveJobs, pollCaptureStatus])
 
-  // Load initial capture status for all pages
+  // Load initial capture status for all pages (only once per site)
   useEffect(() => {
     if (pages.length === 0) return
+    if (captureStatusLoadedRef.current) return
+    
+    captureStatusLoadedRef.current = true
     
     const loadCaptureStatuses = async () => {
       const statusPromises = pages.map(page => 
@@ -154,6 +172,8 @@ export function SiteDetailPage() {
 
   useEffect(() => {
     initialLoadDone.current = false
+    captureStatusLoadedRef.current = false
+    setCaptureJobs(new Map())
     setIsLoading(true)
     loadData()
   }, [siteId]) // Only reload when siteId changes

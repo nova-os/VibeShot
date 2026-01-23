@@ -167,7 +167,7 @@ async function executeInstructions(browserPage, instructions, viewportName) {
  * @param {Browser} browser - Puppeteer browser instance
  * @param {Object} page - Page object from database
  * @param {Object} viewport - Viewport configuration
- * @returns {Object} Screenshot result with file paths and metadata
+ * @returns {Object} Screenshot result with file paths, metadata, and captured errors
  */
 async function captureScreenshotForViewport(browser, page, viewport) {
   const timestamp = Date.now();
@@ -193,9 +193,70 @@ async function captureScreenshotForViewport(browser, page, viewport) {
 
   let browserPage = null;
   
+  // Collect JS and network errors during page load
+  const jsErrors = [];
+  const networkErrors = [];
+  
   try {
     // Create new page
     browserPage = await browser.newPage();
+    
+    // Set up JS error listener (console errors and uncaught exceptions)
+    browserPage.on('console', msg => {
+      if (msg.type() === 'error') {
+        const location = msg.location();
+        jsErrors.push({
+          type: 'js',
+          message: msg.text(),
+          source: location.url || null,
+          lineNumber: location.lineNumber || null,
+          columnNumber: location.columnNumber || null,
+          stack: null
+        });
+      }
+    });
+    
+    browserPage.on('pageerror', error => {
+      jsErrors.push({
+        type: 'js',
+        message: error.message,
+        source: null,
+        lineNumber: null,
+        columnNumber: null,
+        stack: error.stack || null
+      });
+    });
+    
+    // Set up network error listener
+    browserPage.on('requestfailed', request => {
+      const failure = request.failure();
+      // Only capture actual failures, not aborted requests (like canceled XHR)
+      if (failure && failure.errorText !== 'net::ERR_ABORTED') {
+        networkErrors.push({
+          type: 'network',
+          message: failure.errorText || 'Request failed',
+          requestUrl: request.url(),
+          requestMethod: request.method(),
+          statusCode: null,
+          resourceType: request.resourceType()
+        });
+      }
+    });
+    
+    // Also capture HTTP errors (4xx, 5xx responses)
+    browserPage.on('response', response => {
+      const status = response.status();
+      if (status >= 400) {
+        networkErrors.push({
+          type: 'network',
+          message: `HTTP ${status} ${response.statusText()}`,
+          requestUrl: response.url(),
+          requestMethod: response.request().method(),
+          statusCode: status,
+          resourceType: response.request().resourceType()
+        });
+      }
+    });
     
     // Set viewport
     await browserPage.setViewport({
@@ -286,6 +347,12 @@ async function captureScreenshotForViewport(browser, page, viewport) {
       .toFile(thumbnailPath);
 
     console.log(`Screenshot: Saved to ${relativeFilePath}`);
+    
+    // Log error counts if any
+    const totalErrors = jsErrors.length + networkErrors.length;
+    if (totalErrors > 0) {
+      console.log(`Screenshot: Captured ${jsErrors.length} JS errors and ${networkErrors.length} network errors (${viewport.name})`);
+    }
 
     return {
       screenshot: {
@@ -295,7 +362,8 @@ async function captureScreenshotForViewport(browser, page, viewport) {
         thumbnailPath: relativeThumbnailPath,
         fileSize: stats.size,
         width: metadata.width,
-        height: metadata.height
+        height: metadata.height,
+        errors: [...jsErrors, ...networkErrors]
       },
       instructions: instructionResults
     };

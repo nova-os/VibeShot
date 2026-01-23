@@ -69,13 +69,23 @@ router.delete('/batch', async (req, res) => {
   }
 });
 
-// Get screenshot metadata
+// Get screenshot metadata (includes error counts)
 router.get('/:id', async (req, res) => {
   try {
     const [screenshots] = await db.query(
-      `SELECT sc.* FROM screenshots sc
+      `SELECT sc.*,
+              COALESCE(error_counts.js_error_count, 0) as js_error_count,
+              COALESCE(error_counts.network_error_count, 0) as network_error_count
+       FROM screenshots sc
        JOIN pages p ON sc.page_id = p.id
        JOIN sites s ON p.site_id = s.id
+       LEFT JOIN (
+         SELECT screenshot_id,
+                SUM(CASE WHEN error_type = 'js' THEN 1 ELSE 0 END) as js_error_count,
+                SUM(CASE WHEN error_type = 'network' THEN 1 ELSE 0 END) as network_error_count
+         FROM screenshot_errors
+         GROUP BY screenshot_id
+       ) error_counts ON sc.id = error_counts.screenshot_id
        WHERE sc.id = ? AND s.user_id = ?`,
       [req.params.id, req.user.id]
     );
@@ -88,6 +98,64 @@ router.get('/:id', async (req, res) => {
   } catch (error) {
     console.error('Get screenshot error:', error);
     res.status(500).json({ error: 'Failed to get screenshot' });
+  }
+});
+
+// Get errors for a screenshot
+router.get('/:id/errors', async (req, res) => {
+  try {
+    // Verify ownership first
+    const [screenshots] = await db.query(
+      `SELECT sc.id FROM screenshots sc
+       JOIN pages p ON sc.page_id = p.id
+       JOIN sites s ON p.site_id = s.id
+       WHERE sc.id = ? AND s.user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: 'Screenshot not found' });
+    }
+
+    // Get all errors for this screenshot
+    const [errors] = await db.query(
+      `SELECT id, error_type, message, source, line_number, column_number, stack,
+              request_url, request_method, status_code, resource_type, created_at
+       FROM screenshot_errors
+       WHERE screenshot_id = ?
+       ORDER BY error_type ASC, id ASC`,
+      [req.params.id]
+    );
+
+    // Group errors by type
+    const jsErrors = errors.filter(e => e.error_type === 'js').map(e => ({
+      id: e.id,
+      message: e.message,
+      source: e.source,
+      lineNumber: e.line_number,
+      columnNumber: e.column_number,
+      stack: e.stack,
+      createdAt: e.created_at
+    }));
+
+    const networkErrors = errors.filter(e => e.error_type === 'network').map(e => ({
+      id: e.id,
+      message: e.message,
+      requestUrl: e.request_url,
+      requestMethod: e.request_method,
+      statusCode: e.status_code,
+      resourceType: e.resource_type,
+      createdAt: e.created_at
+    }));
+
+    res.json({
+      jsErrors,
+      networkErrors,
+      totalErrors: errors.length
+    });
+  } catch (error) {
+    console.error('Get screenshot errors:', error);
+    res.status(500).json({ error: 'Failed to get screenshot errors' });
   }
 });
 

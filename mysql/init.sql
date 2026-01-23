@@ -112,3 +112,26 @@ CREATE TABLE IF NOT EXISTS capture_jobs (
     INDEX idx_page_status (page_id, status),
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Screenshot errors table (JS console errors and network failures captured during screenshot)
+CREATE TABLE IF NOT EXISTS screenshot_errors (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    screenshot_id INT NOT NULL,
+    error_type ENUM('js', 'network') NOT NULL,
+    message TEXT NOT NULL,
+    -- JS error specific fields
+    source VARCHAR(2048) NULL,
+    line_number INT NULL,
+    column_number INT NULL,
+    stack TEXT NULL,
+    -- Network error specific fields
+    request_url VARCHAR(2048) NULL,
+    request_method VARCHAR(10) NULL,
+    status_code INT NULL,
+    resource_type VARCHAR(50) NULL,
+    -- Timestamp
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (screenshot_id) REFERENCES screenshots(id) ON DELETE CASCADE,
+    INDEX idx_screenshot_id (screenshot_id),
+    INDEX idx_error_type (error_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
