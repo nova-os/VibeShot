@@ -1,26 +1,56 @@
 import { useNavigate } from 'react-router-dom'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { cn, formatInterval, formatDate } from '@/lib/utils'
 import type { Page } from '@/lib/api'
 
 interface PageCardProps {
   page: Page
   siteId: number
+  selectMode?: boolean
+  isSelected?: boolean
+  onSelect?: (id: number) => void
 }
 
-export function PageCard({ page, siteId }: PageCardProps) {
+export function PageCard({ page, siteId, selectMode = false, isSelected = false, onSelect }: PageCardProps) {
   const navigate = useNavigate()
+
+  const handleClick = () => {
+    if (selectMode && onSelect) {
+      onSelect(page.id)
+    } else {
+      navigate(`/sites/${siteId}/pages/${page.id}`)
+    }
+  }
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onSelect) {
+      onSelect(page.id)
+    }
+  }
 
   return (
     <Card
       className={cn(
         "cursor-pointer transition-all hover:border-primary/50 hover:bg-accent/50",
-        !page.is_active && "opacity-50"
+        !page.is_active && "opacity-50",
+        selectMode && isSelected && "border-primary bg-primary/5"
       )}
-      onClick={() => navigate(`/sites/${siteId}/pages/${page.id}`)}
+      onClick={handleClick}
     >
       <div className="flex items-center gap-4 p-4">
+        {/* Checkbox (shown in select mode) */}
+        {selectMode && (
+          <div onClick={handleCheckboxClick}>
+            <Checkbox 
+              checked={isSelected}
+              className="shrink-0"
+            />
+          </div>
+        )}
+
         {/* Status Indicator */}
         <div
           className={cn(

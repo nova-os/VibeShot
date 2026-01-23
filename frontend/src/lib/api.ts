@@ -277,6 +277,13 @@ class ApiClient {
     })
   }
 
+  async deletePages(ids: number[]): Promise<{ deletedCount: number }> {
+    return this.request<{ deletedCount: number }>('/pages/batch', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    })
+  }
+
   async triggerCapture(pageId: number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/pages/${pageId}/capture`, {
       method: 'POST',

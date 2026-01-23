@@ -31,6 +31,43 @@ async function callWorkerApi(endpoint, body) {
   return response.json();
 }
 
+// Batch delete pages (must be before /:id routes)
+router.delete('/batch', async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+
+    // Verify ownership of all pages
+    const placeholders = ids.map(() => '?').join(',');
+    const [pages] = await db.query(
+      `SELECT p.* FROM pages p
+       JOIN sites s ON p.site_id = s.id
+       WHERE p.id IN (${placeholders}) AND s.user_id = ?`,
+      [...ids, req.user.id]
+    );
+
+    if (pages.length === 0) {
+      return res.status(404).json({ error: 'No pages found' });
+    }
+
+    // Delete all verified pages (cascade will handle screenshots and instructions)
+    const deletedIds = pages.map(p => p.id);
+    const deletePlaceholders = deletedIds.map(() => '?').join(',');
+    await db.query(`DELETE FROM pages WHERE id IN (${deletePlaceholders})`, deletedIds);
+
+    res.json({ 
+      message: 'Pages deleted successfully',
+      deletedCount: deletedIds.length
+    });
+  } catch (error) {
+    console.error('Delete pages batch error:', error);
+    res.status(500).json({ error: 'Failed to delete pages' });
+  }
+});
+
 // Get single page
 router.get('/:id', async (req, res) => {
   try {

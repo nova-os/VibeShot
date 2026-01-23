@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/icon'
 import { PageCard, PageCardSkeleton } from '@/components/pages/PageCard'
 import { AddPageDialog } from '@/components/pages/AddPageDialog'
 import { DeleteSiteDialog } from '@/components/sites/DeleteSiteDialog'
+import { DeletePagesDialog } from '@/components/pages/DeletePagesDialog'
 import { DiscoverPagesDialog } from '@/components/sites/DiscoverPagesDialog'
 import { EditSiteDialog } from '@/components/sites/EditSiteDialog'
 import { usePolling } from '@/hooks/usePolling'
@@ -22,6 +23,11 @@ export function SiteDetailPage() {
   const [discoverDialogOpen, setDiscoverDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const initialLoadDone = useRef(false)
+
+  // Select mode for batch delete
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [deletePagesDialogOpen, setDeletePagesDialogOpen] = useState(false)
 
   const loadData = useCallback(async () => {
     if (!siteId) return
@@ -52,6 +58,34 @@ export function SiteDetailPage() {
 
   // Poll for updates every 30 seconds
   usePolling(loadData, { enabled: !!siteId })
+
+  // Selection handlers
+  const handleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    setSelectedIds(new Set(pages.map(p => p.id)))
+  }
+
+  const handleSelectNone = () => {
+    setSelectedIds(new Set())
+  }
+
+  const toggleSelectMode = () => {
+    setSelectMode(prev => !prev)
+    setSelectedIds(new Set())
+  }
+
+  const selectedPages = pages.filter(p => selectedIds.has(p.id))
 
   if (isLoading) {
     return (
@@ -121,6 +155,46 @@ export function SiteDetailPage() {
         </div>
       </div>
 
+      {/* Select Mode Controls */}
+      {pages.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div className="flex gap-2">
+            <Button
+              variant={selectMode ? 'default' : 'secondary'}
+              onClick={toggleSelectMode}
+            >
+              {selectMode ? (
+                <>
+                  <Icon name="close" size="sm" />
+                  Cancel
+                </>
+              ) : (
+                <>
+                  <Icon name="check_box" size="sm" />
+                  Select
+                </>
+              )}
+            </Button>
+            {selectMode && (
+              <>
+                <Button variant="outline" onClick={handleSelectAll}>
+                  Select All
+                </Button>
+                <Button variant="outline" onClick={handleSelectNone}>
+                  Select None
+                </Button>
+              </>
+            )}
+          </div>
+          {selectMode && selectedIds.size > 0 && (
+            <Button variant="destructive" onClick={() => setDeletePagesDialogOpen(true)}>
+              <Icon name="delete" size="sm" />
+              Delete {selectedIds.size} Page{selectedIds.size !== 1 ? 's' : ''}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Pages List */}
       {pages.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-border rounded-lg">
@@ -143,7 +217,14 @@ export function SiteDetailPage() {
       ) : (
         <div className="space-y-4">
           {pages.map((page) => (
-            <PageCard key={page.id} page={page} siteId={site.id} />
+            <PageCard
+              key={page.id}
+              page={page}
+              siteId={site.id}
+              selectMode={selectMode}
+              isSelected={selectedIds.has(page.id)}
+              onSelect={handleSelect}
+            />
           ))}
         </div>
       )}
@@ -175,6 +256,17 @@ export function SiteDetailPage() {
         site={site}
         onSuccess={(updatedSite) => {
           setSite(updatedSite)
+        }}
+      />
+
+      <DeletePagesDialog
+        open={deletePagesDialogOpen}
+        onOpenChange={setDeletePagesDialogOpen}
+        pages={selectedPages}
+        onSuccess={() => {
+          setSelectMode(false)
+          setSelectedIds(new Set())
+          loadData()
         }}
       />
     </div>

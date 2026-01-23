@@ -37,6 +37,10 @@ export function ScreenshotsPage() {
   const [compareMode, setCompareMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
+  // Delete mode for groups
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set())
+
   // Dialogs
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -161,6 +165,59 @@ export function ScreenshotsPage() {
   const toggleCompareMode = () => {
     setCompareMode(prev => !prev)
     setSelectedIds(new Set())
+    // Exit delete mode when entering compare mode
+    if (!compareMode) {
+      setDeleteMode(false)
+      setSelectedGroups(new Set())
+    }
+  }
+
+  const toggleDeleteMode = () => {
+    setDeleteMode(prev => !prev)
+    setSelectedGroups(new Set())
+    // Exit compare mode when entering delete mode
+    if (!deleteMode) {
+      setCompareMode(false)
+      setSelectedIds(new Set())
+    }
+  }
+
+  const handleSelectGroup = (timestamp: string) => {
+    setSelectedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(timestamp)) {
+        next.delete(timestamp)
+      } else {
+        next.add(timestamp)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllGroups = () => {
+    setSelectedGroups(new Set(groupedScreenshots.map(g => g.timestamp)))
+  }
+
+  const handleSelectNoGroups = () => {
+    setSelectedGroups(new Set())
+  }
+
+  // Get all screenshot IDs from selected groups for deletion
+  const getSelectedGroupScreenshotIds = (): number[] => {
+    const ids: number[] = []
+    groupedScreenshots
+      .filter(g => selectedGroups.has(g.timestamp))
+      .forEach(g => {
+        g.screenshots.forEach(s => ids.push(s.id))
+      })
+    return ids
+  }
+
+  const handleDeleteSelectedGroups = () => {
+    const ids = getSelectedGroupScreenshotIds()
+    if (ids.length > 0) {
+      setDeleteScreenshotsIds(ids)
+    }
   }
 
   if (isLoading) {
@@ -232,7 +289,7 @@ export function ScreenshotsPage() {
         onUpdate={loadData}
       />
 
-      {/* Viewport Filter & Compare Mode */}
+      {/* Viewport Filter & Mode Controls */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <Tabs value={viewportFilter} onValueChange={(v) => setViewportFilter(v as ViewportFilter)}>
           <TabsList>
@@ -253,6 +310,7 @@ export function ScreenshotsPage() {
         </Tabs>
 
         <div className="flex gap-2">
+          {/* Compare Mode Controls */}
           <Button
             variant={compareMode ? 'default' : 'secondary'}
             onClick={toggleCompareMode}
@@ -273,6 +331,44 @@ export function ScreenshotsPage() {
             <Button onClick={handleCompare}>
               Compare Selected
             </Button>
+          )}
+
+          {/* Delete Mode Controls (only in 'all' view where groups are shown) */}
+          {viewportFilter === 'all' && !compareMode && (
+            <>
+              <Button
+                variant={deleteMode ? 'default' : 'secondary'}
+                onClick={toggleDeleteMode}
+              >
+                {deleteMode ? (
+                  <>
+                    <Icon name="close" size="sm" />
+                    Cancel
+                  </>
+                ) : (
+                  <>
+                    <Icon name="check_box" size="sm" />
+                    Select Groups
+                  </>
+                )}
+              </Button>
+              {deleteMode && (
+                <>
+                  <Button variant="outline" onClick={handleSelectAllGroups}>
+                    All
+                  </Button>
+                  <Button variant="outline" onClick={handleSelectNoGroups}>
+                    None
+                  </Button>
+                  {selectedGroups.size > 0 && (
+                    <Button variant="destructive" onClick={handleDeleteSelectedGroups}>
+                      <Icon name="delete" size="sm" />
+                      Delete {selectedGroups.size} Group{selectedGroups.size !== 1 ? 's' : ''}
+                    </Button>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -311,6 +407,9 @@ export function ScreenshotsPage() {
                 onSelect={handleSelectForCompare}
                 onView={setViewerId}
                 onDeleteSet={handleDeleteScreenshotSet}
+                deleteMode={deleteMode}
+                isGroupSelected={selectedGroups.has(group.timestamp)}
+                onSelectGroup={() => handleSelectGroup(group.timestamp)}
               />
             </div>
           ))}
@@ -360,7 +459,11 @@ export function ScreenshotsPage() {
         open={deleteScreenshotsIds.length > 0}
         onOpenChange={(open) => !open && setDeleteScreenshotsIds([])}
         screenshotIds={deleteScreenshotsIds}
-        onSuccess={loadScreenshots}
+        onSuccess={() => {
+          setDeleteMode(false)
+          setSelectedGroups(new Set())
+          loadScreenshots()
+        }}
       />
     </div>
   )
