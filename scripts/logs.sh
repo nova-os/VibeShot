@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Logs Script
+# VibeShot Logs Script
 # Shows logs for all or specific services
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

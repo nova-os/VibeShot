@@ -82,7 +82,7 @@ export function AuthPage() {
           <div className="flex items-center justify-center gap-3 mb-4">
             <Icon name="screenshot_monitor" className="text-primary" size="xl" filled />
             <span className="text-3xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
-              AIShot
+              VibeShot
             </span>
           </div>
           <p className="text-muted-foreground">
@@ -141,7 +141,7 @@ export function AuthPage() {
 
               <TabsContent value="register" className="mt-6">
                 <CardTitle className="text-xl">Create an account</CardTitle>
-                <CardDescription>Get started with AIShot</CardDescription>
+                <CardDescription>Get started with VibeShot</CardDescription>
                 <form onSubmit={handleRegister} className="mt-6 space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="register-email">Email</Label>

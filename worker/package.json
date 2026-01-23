@@ -1,7 +1,7 @@
 {
-  "name": "aishot-worker",
+  "name": "vibeshot-worker",
   "version": "1.0.0",
-  "description": "Background worker for AIShot screenshot capture",
+  "description": "Background worker for VibeShot screenshot capture",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

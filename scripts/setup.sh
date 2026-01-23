@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Setup Script
+# VibeShot Setup Script
 # Run this once to initialize the project
 
 set -e
@@ -10,7 +10,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "🚀 AIShot Setup"
+echo "🚀 VibeShot Setup"
 echo "==============="
 
 # Create data directories

@@ -1,4 +1,4 @@
-# AIShot - Website Screenshot Monitor
+# VibeShot - Website Screenshot Monitor
 
 A web application for automated website screenshot monitoring. Track visual changes on your websites with periodic full-page screenshots.
 
@@ -44,7 +44,7 @@ A web application for automated website screenshot monitoring. Track visual chan
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd aishot
+   cd vibeshot
    ```
 
 2. Create environment file:
@@ -55,8 +55,8 @@ A web application for automated website screenshot monitoring. Track visual chan
 3. Edit `.env` and set secure values:
    ```env
    MYSQL_ROOT_PASSWORD=your-secure-root-password
-   MYSQL_DATABASE=aishot
-   MYSQL_USER=aishot
+   MYSQL_DATABASE=vibeshot
+   MYSQL_USER=vibeshot
    MYSQL_PASSWORD=your-secure-password
    JWT_SECRET=your-super-secret-jwt-key-change-this
    ```
@@ -99,8 +99,8 @@ The seed script creates a test site (heise.de) with two pages for testing.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MYSQL_ROOT_PASSWORD` | MySQL root password | - |
-| `MYSQL_DATABASE` | Database name | aishot |
-| `MYSQL_USER` | Database user | aishot |
+| `MYSQL_DATABASE` | Database name | vibeshot |
+| `MYSQL_USER` | Database user | vibeshot |
 | `MYSQL_PASSWORD` | Database password | - |
 | `JWT_SECRET` | Secret for JWT tokens | - |
 | `BROWSER_POOL_SIZE` | Number of parallel browsers | 4 |
@@ -136,10 +136,10 @@ When adding a page, you can configure the capture interval in minutes:
 
 2. Start MySQL locally or via Docker:
    ```bash
-   docker run -d --name aishot-mysql \
+   docker run -d --name vibeshot-mysql \
      -e MYSQL_ROOT_PASSWORD=root \
-     -e MYSQL_DATABASE=aishot \
-     -e MYSQL_USER=aishot \
+     -e MYSQL_DATABASE=vibeshot \
+     -e MYSQL_USER=vibeshot \
      -e MYSQL_PASSWORD=password \
      -p 3306:3306 \
      mysql:8.0
@@ -147,7 +147,7 @@ When adding a page, you can configure the capture interval in minutes:
 
 3. Initialize database:
    ```bash
-   mysql -u aishot -p aishot < mysql/init.sql
+   mysql -u vibeshot -p vibeshot < mysql/init.sql
    ```
 
 4. Start the API server:
@@ -165,7 +165,7 @@ When adding a page, you can configure the capture interval in minutes:
 ### Project Structure
 
 ```
-aishot/
+vibeshot/
 ├── docker-compose.yml      # Docker orchestration
 ├── api/                    # Express.js API server
 │   ├── src/

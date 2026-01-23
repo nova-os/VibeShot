@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Start Script
+# VibeShot Start Script
 # Starts all services
 
 set -e
@@ -10,7 +10,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "🚀 Starting AIShot..."
+echo "🚀 Starting VibeShot..."
 
 # Ensure data directories exist
 mkdir -p data/mysql
@@ -20,7 +20,7 @@ mkdir -p data/screenshots
 docker-compose up -d
 
 echo ""
-echo "✅ AIShot is running!"
+echo "✅ VibeShot is running!"
 echo ""
 echo "   🌐 Web UI: http://localhost:3000"
 echo "   📊 MySQL:  localhost:3306"

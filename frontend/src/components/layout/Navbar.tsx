@@ -31,7 +31,7 @@ export function Navbar() {
           <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <Icon name="screenshot_monitor" className="text-primary" size="lg" filled />
             <span className="text-xl font-bold bg-gradient-to-r from-foreground to-primary bg-clip-text text-transparent">
-              AIShot
+              VibeShot
             </span>
           </Link>
 

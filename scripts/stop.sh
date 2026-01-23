@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Stop Script
+# VibeShot Stop Script
 # Stops all services
 
 set -e
@@ -10,8 +10,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "🛑 Stopping AIShot..."
+echo "🛑 Stopping VibeShot..."
 
 docker-compose down
 
-echo "✅ AIShot stopped"
+echo "✅ VibeShot stopped"

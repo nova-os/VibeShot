@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Seed Script
+# VibeShot Seed Script
 # Seeds the database with test data
 
 set -e
@@ -12,7 +12,7 @@ cd "$PROJECT_DIR"
 
 API_URL="http://localhost:3000"
 
-echo "🌱 Seeding AIShot database..."
+echo "🌱 Seeding VibeShot database..."
 
 # Wait for API to be ready
 echo "⏳ Waiting for API to be ready..."

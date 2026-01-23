@@ -1,8 +1,8 @@
-# AIShot - Website Screenshot Monitor
+# VibeShot - Website Screenshot Monitor
 
 ## Project Overview
 
-AIShot is a web application for automated website screenshot monitoring. It captures periodic full-page screenshots of configured web pages and stores them for historical comparison.
+VibeShot is a web application for automated website screenshot monitoring. It captures periodic full-page screenshots of configured web pages and stores them for historical comparison.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ The application uses a microservices architecture with Docker Compose:
 ## Directory Structure
 
 ```
-aishot/
+vibeshot/
 ├── docker-compose.yml          # Service orchestration
 ├── .env                        # Environment variables (not in git)
 ├── api/                        # Express.js API server
@@ -186,8 +186,8 @@ screenshots/
 ```env
 # MySQL
 MYSQL_ROOT_PASSWORD=...
-MYSQL_DATABASE=aishot
-MYSQL_USER=aishot
+MYSQL_DATABASE=vibeshot
+MYSQL_USER=vibeshot
 MYSQL_PASSWORD=...
 
 # JWT

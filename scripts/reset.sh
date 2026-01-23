@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Reset Script
+# VibeShot Reset Script
 # Resets all data (MySQL + screenshots)
 
 set -e

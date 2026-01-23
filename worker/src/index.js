@@ -6,7 +6,7 @@ const POOL_SIZE = parseInt(process.env.BROWSER_POOL_SIZE) || 4;
 const API_PORT = parseInt(process.env.WORKER_API_PORT) || 3001;
 
 async function main() {
-  console.log('AIShot Worker starting...');
+  console.log('VibeShot Worker starting...');
   console.log(`Browser pool size: ${POOL_SIZE}`);
 
   // Initialize browser pool

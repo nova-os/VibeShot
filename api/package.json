@@ -1,7 +1,7 @@
 {
-  "name": "aishot-api",
+  "name": "vibeshot-api",
   "version": "1.0.0",
-  "description": "API server for AIShot screenshot monitoring",
+  "description": "API server for VibeShot screenshot monitoring",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

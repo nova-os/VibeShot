@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AIShot Install Script
+# VibeShot Install Script
 # Reinstalls dependencies (run after changing package.json)
 
 set -e

@@ -1,4 +1,4 @@
--- AIShot Database Schema
+-- VibeShot Database Schema
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL UNIQUE,
     default_interval_minutes INT NOT NULL DEFAULT 1440,
-    default_viewports JSON NOT NULL DEFAULT '[1920, 768, 375]',
+    default_viewports JSON DEFAULT (JSON_ARRAY(1920, 768, 375)),
     -- Retention policy settings (GFS-style backup rotation)
     retention_enabled BOOLEAN DEFAULT FALSE,
     max_screenshots_per_page INT NULL,           -- Hard limit per page (NULL = unlimited)
