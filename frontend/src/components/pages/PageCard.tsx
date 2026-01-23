@@ -87,6 +87,23 @@ export function PageCard({ page, siteId, selectMode = false, isSelected = false,
               {page.latest_screenshot && (
                 <span className="hidden md:inline">Last: {formatDate(page.latest_screenshot)}</span>
               )}
+              {/* Error indicators for latest screenshot group */}
+              {(Number(page.latest_js_error_count || 0) > 0 || Number(page.latest_network_error_count || 0) > 0) && (
+                <div className="flex items-center gap-1">
+                  {Number(page.latest_js_error_count || 0) > 0 && (
+                    <Badge variant="destructive" className="px-1.5 py-0.5 text-xs gap-1">
+                      <Icon name="code_off" size="xs" />
+                      {page.latest_js_error_count}
+                    </Badge>
+                  )}
+                  {Number(page.latest_network_error_count || 0) > 0 && (
+                    <Badge variant="secondary" className="px-1.5 py-0.5 text-xs gap-1 bg-orange-500/90 text-white border-0">
+                      <Icon name="cloud_off" size="xs" />
+                      {page.latest_network_error_count}
+                    </Badge>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
