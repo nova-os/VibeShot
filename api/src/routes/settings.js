@@ -11,6 +11,17 @@ router.use(authenticateToken);
 const DEFAULT_INTERVAL_MINUTES = 1440; // 24 hours
 const DEFAULT_VIEWPORTS = [1920, 768, 375];
 
+// Default retention settings
+const DEFAULT_RETENTION = {
+  retention_enabled: false,
+  max_screenshots_per_page: null,
+  keep_per_day: 4,
+  keep_per_week: 2,
+  keep_per_month: 1,
+  keep_per_year: 1,
+  max_age_days: null
+};
+
 // Get user settings (creates defaults if not exists)
 router.get('/', async (req, res) => {
   try {
@@ -44,7 +55,15 @@ router.get('/', async (req, res) => {
 
     res.json({
       default_interval_minutes: userSettings.default_interval_minutes,
-      default_viewports: viewports
+      default_viewports: viewports,
+      // Retention settings
+      retention_enabled: Boolean(userSettings.retention_enabled),
+      max_screenshots_per_page: userSettings.max_screenshots_per_page,
+      keep_per_day: userSettings.keep_per_day ?? DEFAULT_RETENTION.keep_per_day,
+      keep_per_week: userSettings.keep_per_week ?? DEFAULT_RETENTION.keep_per_week,
+      keep_per_month: userSettings.keep_per_month ?? DEFAULT_RETENTION.keep_per_month,
+      keep_per_year: userSettings.keep_per_year ?? DEFAULT_RETENTION.keep_per_year,
+      max_age_days: userSettings.max_age_days
     });
   } catch (error) {
     console.error('Get settings error:', error);
@@ -55,7 +74,18 @@ router.get('/', async (req, res) => {
 // Update user settings
 router.put('/', async (req, res) => {
   try {
-    const { default_interval_minutes, default_viewports } = req.body;
+    const { 
+      default_interval_minutes, 
+      default_viewports,
+      // Retention settings
+      retention_enabled,
+      max_screenshots_per_page,
+      keep_per_day,
+      keep_per_week,
+      keep_per_month,
+      keep_per_year,
+      max_age_days
+    } = req.body;
 
     // Validate interval
     if (default_interval_minutes !== undefined) {
@@ -76,6 +106,43 @@ router.put('/', async (req, res) => {
       }
     }
 
+    // Validate retention settings
+    if (max_screenshots_per_page !== undefined && max_screenshots_per_page !== null) {
+      if (!Number.isInteger(max_screenshots_per_page) || max_screenshots_per_page < 1) {
+        return res.status(400).json({ error: 'Max screenshots per page must be at least 1' });
+      }
+    }
+
+    if (keep_per_day !== undefined) {
+      if (!Number.isInteger(keep_per_day) || keep_per_day < 1) {
+        return res.status(400).json({ error: 'Keep per day must be at least 1' });
+      }
+    }
+
+    if (keep_per_week !== undefined) {
+      if (!Number.isInteger(keep_per_week) || keep_per_week < 1) {
+        return res.status(400).json({ error: 'Keep per week must be at least 1' });
+      }
+    }
+
+    if (keep_per_month !== undefined) {
+      if (!Number.isInteger(keep_per_month) || keep_per_month < 1) {
+        return res.status(400).json({ error: 'Keep per month must be at least 1' });
+      }
+    }
+
+    if (keep_per_year !== undefined) {
+      if (!Number.isInteger(keep_per_year) || keep_per_year < 1) {
+        return res.status(400).json({ error: 'Keep per year must be at least 1' });
+      }
+    }
+
+    if (max_age_days !== undefined && max_age_days !== null) {
+      if (!Number.isInteger(max_age_days) || max_age_days < 1) {
+        return res.status(400).json({ error: 'Max age must be at least 1 day' });
+      }
+    }
+
     // Check if settings exist
     const [existing] = await db.query(
       'SELECT id FROM user_settings WHERE user_id = ?',
@@ -93,28 +160,64 @@ router.put('/', async (req, res) => {
           JSON.stringify(default_viewports || DEFAULT_VIEWPORTS)
         ]
       );
-    } else {
-      // Update existing settings
-      const updates = [];
-      const values = [];
+    }
 
-      if (default_interval_minutes !== undefined) {
-        updates.push('default_interval_minutes = ?');
-        values.push(default_interval_minutes);
-      }
+    // Update settings (always do this, even after insert, to handle retention fields)
+    const updates = [];
+    const values = [];
 
-      if (default_viewports !== undefined) {
-        updates.push('default_viewports = ?');
-        values.push(JSON.stringify(default_viewports));
-      }
+    if (default_interval_minutes !== undefined) {
+      updates.push('default_interval_minutes = ?');
+      values.push(default_interval_minutes);
+    }
 
-      if (updates.length > 0) {
-        values.push(req.user.id);
-        await db.query(
-          `UPDATE user_settings SET ${updates.join(', ')} WHERE user_id = ?`,
-          values
-        );
-      }
+    if (default_viewports !== undefined) {
+      updates.push('default_viewports = ?');
+      values.push(JSON.stringify(default_viewports));
+    }
+
+    // Retention settings
+    if (retention_enabled !== undefined) {
+      updates.push('retention_enabled = ?');
+      values.push(retention_enabled ? 1 : 0);
+    }
+
+    if (max_screenshots_per_page !== undefined) {
+      updates.push('max_screenshots_per_page = ?');
+      values.push(max_screenshots_per_page);
+    }
+
+    if (keep_per_day !== undefined) {
+      updates.push('keep_per_day = ?');
+      values.push(keep_per_day);
+    }
+
+    if (keep_per_week !== undefined) {
+      updates.push('keep_per_week = ?');
+      values.push(keep_per_week);
+    }
+
+    if (keep_per_month !== undefined) {
+      updates.push('keep_per_month = ?');
+      values.push(keep_per_month);
+    }
+
+    if (keep_per_year !== undefined) {
+      updates.push('keep_per_year = ?');
+      values.push(keep_per_year);
+    }
+
+    if (max_age_days !== undefined) {
+      updates.push('max_age_days = ?');
+      values.push(max_age_days);
+    }
+
+    if (updates.length > 0) {
+      values.push(req.user.id);
+      await db.query(
+        `UPDATE user_settings SET ${updates.join(', ')} WHERE user_id = ?`,
+        values
+      );
     }
 
     // Return updated settings
@@ -131,7 +234,15 @@ router.put('/', async (req, res) => {
 
     res.json({
       default_interval_minutes: userSettings.default_interval_minutes,
-      default_viewports: viewports
+      default_viewports: viewports,
+      // Retention settings
+      retention_enabled: Boolean(userSettings.retention_enabled),
+      max_screenshots_per_page: userSettings.max_screenshots_per_page,
+      keep_per_day: userSettings.keep_per_day ?? DEFAULT_RETENTION.keep_per_day,
+      keep_per_week: userSettings.keep_per_week ?? DEFAULT_RETENTION.keep_per_week,
+      keep_per_month: userSettings.keep_per_month ?? DEFAULT_RETENTION.keep_per_month,
+      keep_per_year: userSettings.keep_per_year ?? DEFAULT_RETENTION.keep_per_year,
+      max_age_days: userSettings.max_age_days
     });
   } catch (error) {
     console.error('Update settings error:', error);

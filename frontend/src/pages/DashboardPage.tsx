@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { SiteCard, SiteCardSkeleton, EmptyState } from '@/components/sites/SiteCard'
 import { AddSiteDialog } from '@/components/sites/AddSiteDialog'
+import { usePolling } from '@/hooks/usePolling'
 import { toast } from 'sonner'
 
 export function DashboardPage() {
@@ -16,15 +17,21 @@ export function DashboardPage() {
       const data = await api.getSites()
       setSites(data)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load sites')
+      // Only show error on initial load, not during polling
+      if (isLoading) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load sites')
+      }
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [isLoading])
 
   useEffect(() => {
     loadSites()
-  }, [loadSites])
+  }, []) // Only run once on mount
+
+  // Poll for updates every 30 seconds
+  usePolling(loadSites)
 
   return (
     <div>

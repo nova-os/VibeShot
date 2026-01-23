@@ -9,12 +9,20 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- User settings table (default capture settings)
+-- User settings table (default capture settings and retention policy)
 CREATE TABLE IF NOT EXISTS user_settings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL UNIQUE,
     default_interval_minutes INT NOT NULL DEFAULT 1440,
     default_viewports JSON NOT NULL DEFAULT '[1920, 768, 375]',
+    -- Retention policy settings (GFS-style backup rotation)
+    retention_enabled BOOLEAN DEFAULT FALSE,
+    max_screenshots_per_page INT NULL,           -- Hard limit per page (NULL = unlimited)
+    keep_per_day INT DEFAULT 4,                  -- Keep 4 per day for first week
+    keep_per_week INT DEFAULT 2,                 -- Keep 2 per week for first month
+    keep_per_month INT DEFAULT 1,                -- Keep 1 per month for first year
+    keep_per_year INT DEFAULT 1,                 -- Keep 1 per year for older
+    max_age_days INT NULL,                       -- Delete after X days (NULL = unlimited)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -26,6 +34,8 @@ CREATE TABLE IF NOT EXISTS sites (
     user_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
     domain VARCHAR(255) NOT NULL,
+    interval_minutes INT NULL,
+    viewports JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id)

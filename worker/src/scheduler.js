@@ -1,7 +1,9 @@
 const db = require('./config/database');
 const { captureScreenshots } = require('./screenshot');
+const { runCleanup } = require('./cleanup');
 
 const POLL_INTERVAL = 60000; // 60 seconds
+const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
 // Default settings (fallback when no user settings exist)
 const DEFAULT_INTERVAL_MINUTES = 1440; // 24 hours
@@ -12,7 +14,9 @@ class Scheduler {
     this.browserPool = browserPool;
     this.isRunning = false;
     this.intervalId = null;
+    this.cleanupIntervalId = null;
     this.activeJobs = new Set();
+    this.isCleanupRunning = false;
   }
 
   start() {
@@ -21,9 +25,13 @@ class Scheduler {
     this.isRunning = true;
     console.log('Scheduler: Starting polling loop');
     
-    // Run immediately, then on interval
+    // Run capture check immediately, then on interval
     this.checkAndCapture();
     this.intervalId = setInterval(() => this.checkAndCapture(), POLL_INTERVAL);
+    
+    // Run cleanup after a short delay, then every 6 hours
+    setTimeout(() => this.runCleanupJob(), 60000); // Wait 1 minute before first cleanup
+    this.cleanupIntervalId = setInterval(() => this.runCleanupJob(), CLEANUP_INTERVAL);
   }
 
   stop() {
@@ -34,7 +42,24 @@ class Scheduler {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    if (this.cleanupIntervalId) {
+      clearInterval(this.cleanupIntervalId);
+      this.cleanupIntervalId = null;
+    }
     console.log('Scheduler: Stopped');
+  }
+
+  async runCleanupJob() {
+    if (!this.isRunning || this.isCleanupRunning) return;
+    
+    this.isCleanupRunning = true;
+    try {
+      await runCleanup();
+    } catch (error) {
+      console.error('Scheduler: Cleanup job failed:', error.message);
+    } finally {
+      this.isCleanupRunning = false;
+    }
   }
 
   async checkAndCapture() {
@@ -63,8 +88,8 @@ class Scheduler {
     const [pages] = await db.query(`
       SELECT p.id, p.url, p.name, p.last_screenshot_at,
              s.name as site_name, s.domain as site_domain,
-             COALESCE(p.interval_minutes, us.default_interval_minutes, ?) as effective_interval,
-             COALESCE(p.viewports, us.default_viewports, ?) as effective_viewports
+             COALESCE(p.interval_minutes, s.interval_minutes, us.default_interval_minutes, ?) as effective_interval,
+             COALESCE(p.viewports, s.viewports, us.default_viewports, ?) as effective_viewports
       FROM pages p
       JOIN sites s ON p.site_id = s.id
       LEFT JOIN user_settings us ON s.user_id = us.user_id
@@ -72,7 +97,7 @@ class Scheduler {
         AND (
           p.last_screenshot_at IS NULL
           OR TIMESTAMPDIFF(MINUTE, p.last_screenshot_at, NOW()) >= 
-             COALESCE(p.interval_minutes, us.default_interval_minutes, ?)
+             COALESCE(p.interval_minutes, s.interval_minutes, us.default_interval_minutes, ?)
         )
       ORDER BY p.last_screenshot_at ASC
     `, [DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS, DEFAULT_INTERVAL_MINUTES]);

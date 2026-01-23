@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api, Page, Screenshot, Instruction } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { EditPageDialog } from '@/components/pages/EditPageDialog'
 import { DeletePageDialog } from '@/components/pages/DeletePageDialog'
 import { InstructionsList } from '@/components/instructions/InstructionsList'
 import { DeleteScreenshotsDialog } from '@/components/screenshots/DeleteScreenshotsDialog'
+import { usePolling } from '@/hooks/usePolling'
 import { toast } from 'sonner'
 
 type ViewportFilter = 'all' | 'desktop' | 'tablet' | 'mobile'
@@ -30,6 +31,7 @@ export function ScreenshotsPage() {
   const [instructions, setInstructions] = useState<Instruction[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [viewportFilter, setViewportFilter] = useState<ViewportFilter>('all')
+  const initialLoadDone = useRef(false)
 
   // Compare mode
   const [compareMode, setCompareMode] = useState(false)
@@ -53,9 +55,13 @@ export function ScreenshotsPage() {
       setPage(pageData)
       setInstructions(instructionsData)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load page')
+      // Only show error on initial load, not during polling
+      if (!initialLoadDone.current) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load page')
+      }
     } finally {
       setIsLoading(false)
+      initialLoadDone.current = true
     }
   }, [pageId])
 
@@ -68,19 +74,32 @@ export function ScreenshotsPage() {
       })
       setScreenshots(result.screenshots)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load screenshots')
+      // Silently fail during polling to avoid error spam
+      if (!initialLoadDone.current) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load screenshots')
+      }
     }
   }, [pageId, viewportFilter])
 
+  // Combined refresh function for polling
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadData(), loadScreenshots()])
+  }, [loadData, loadScreenshots])
+
   useEffect(() => {
+    initialLoadDone.current = false
+    setIsLoading(true)
     loadData()
-  }, [loadData])
+  }, [pageId]) // Only reload when pageId changes
 
   useEffect(() => {
     if (page) {
       loadScreenshots()
     }
-  }, [page, loadScreenshots])
+  }, [page, viewportFilter]) // Reload screenshots when page loads or viewport filter changes
+
+  // Poll for updates every 30 seconds
+  usePolling(refreshAll, { enabled: !!pageId && !!page })
 
   // Group screenshots by timestamp
   const groupedScreenshots = useMemo((): ScreenshotGroupData[] => {

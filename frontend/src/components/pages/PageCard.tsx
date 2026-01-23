@@ -37,7 +37,7 @@ export function PageCard({ page, siteId }: PageCardProps) {
 
         {/* Meta */}
         <div className="hidden sm:flex items-center gap-4 text-sm text-muted-foreground shrink-0">
-          <span>Every {formatInterval(page.interval_minutes)}</span>
+          <span>Every {formatInterval(page.interval_minutes ?? 360)}</span>
           <Badge variant="secondary">{page.screenshot_count || 0} screenshots</Badge>
           {page.latest_screenshot && (
             <span className="hidden md:inline">Last: {formatDate(page.latest_screenshot)}</span>

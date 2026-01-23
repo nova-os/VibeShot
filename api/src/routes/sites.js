@@ -23,6 +23,14 @@ router.get('/', async (req, res) => {
        ORDER BY s.created_at DESC`,
       [req.user.id]
     );
+    
+    // Parse viewports JSON for each site
+    for (const site of sites) {
+      if (site.viewports && typeof site.viewports === 'string') {
+        site.viewports = JSON.parse(site.viewports);
+      }
+    }
+    
     res.json(sites);
   } catch (error) {
     console.error('Get sites error:', error);
@@ -42,7 +50,13 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    res.json(sites[0]);
+    const site = sites[0];
+    // Parse viewports if it's a string
+    if (site.viewports && typeof site.viewports === 'string') {
+      site.viewports = JSON.parse(site.viewports);
+    }
+
+    res.json(site);
   } catch (error) {
     console.error('Get site error:', error);
     res.status(500).json({ error: 'Failed to get site' });
@@ -74,7 +88,7 @@ router.post('/', async (req, res) => {
 // Update site
 router.put('/:id', async (req, res) => {
   try {
-    const { name, domain } = req.body;
+    const { name, domain, interval_minutes, viewports } = req.body;
 
     // Verify ownership
     const [existing] = await db.query(
@@ -86,13 +100,46 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    await db.query(
-      'UPDATE sites SET name = COALESCE(?, name), domain = COALESCE(?, domain) WHERE id = ?',
-      [name, domain, req.params.id]
-    );
+    // Build dynamic update query to handle null values explicitly
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    if (domain !== undefined) {
+      updates.push('domain = ?');
+      values.push(domain);
+    }
+    // interval_minutes can be null (use user defaults) or a number
+    if (interval_minutes !== undefined) {
+      updates.push('interval_minutes = ?');
+      values.push(interval_minutes);
+    }
+    // viewports can be null (use user defaults) or an array
+    if (viewports !== undefined) {
+      updates.push('viewports = ?');
+      values.push(viewports ? JSON.stringify(viewports) : null);
+    }
+
+    if (updates.length > 0) {
+      values.push(req.params.id);
+      await db.query(
+        `UPDATE sites SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+    }
 
     const [sites] = await db.query('SELECT * FROM sites WHERE id = ?', [req.params.id]);
-    res.json(sites[0]);
+    
+    // Parse viewports if it's a string
+    const site = sites[0];
+    if (site.viewports && typeof site.viewports === 'string') {
+      site.viewports = JSON.parse(site.viewports);
+    }
+    
+    res.json(site);
   } catch (error) {
     console.error('Update site error:', error);
     res.status(500).json({ error: 'Failed to update site' });

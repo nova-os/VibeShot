@@ -10,6 +10,8 @@ export interface Site {
   user_id: number
   name: string
   domain: string
+  interval_minutes: number | null
+  viewports: number[] | null
   created_at: string
   page_count?: number
   screenshot_count?: number
@@ -32,6 +34,14 @@ export interface Page {
 export interface UserSettings {
   default_interval_minutes: number
   default_viewports: number[]
+  // Retention policy settings
+  retention_enabled: boolean
+  max_screenshots_per_page: number | null
+  keep_per_day: number
+  keep_per_week: number
+  keep_per_month: number
+  keep_per_year: number
+  max_age_days: number | null
 }
 
 export interface Screenshot {
@@ -205,7 +215,7 @@ class ApiClient {
     })
   }
 
-  async updateSite(id: number, data: Partial<Pick<Site, 'name' | 'domain'>>): Promise<Site> {
+  async updateSite(id: number, data: Partial<Pick<Site, 'name' | 'domain' | 'interval_minutes' | 'viewports'>>): Promise<Site> {
     return this.request<Site>(`/sites/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

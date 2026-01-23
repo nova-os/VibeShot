@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 
 class BrowserPool {
-  constructor(size = 4) {
+  constructor(size = 8) {
     this.size = size;
     this.browsers = [];
     this.availableBrowsers = [];

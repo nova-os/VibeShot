@@ -4,10 +4,11 @@ interface IconProps {
   name: string
   className?: string
   filled?: boolean
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 }
 
 const sizeClasses = {
+  xs: 'text-sm',
   sm: 'text-base',
   md: 'text-xl',
   lg: 'text-2xl',

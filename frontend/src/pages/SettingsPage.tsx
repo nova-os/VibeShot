@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Icon } from '@/components/ui/icon'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
+import { RetentionSettingsForm, RetentionSettings } from '@/components/settings/RetentionSettingsForm'
 import { toast } from 'sonner'
 
 export function SettingsPage() {
@@ -34,19 +35,45 @@ export function SettingsPage() {
     }
   }
 
-  const handleChange = (newSettings: { intervalMinutes: number; viewports: number[] }) => {
+  const handleCaptureChange = (newSettings: { intervalMinutes: number; viewports: number[] }) => {
     if (!settings) return
 
     const updated: UserSettings = {
+      ...settings,
       default_interval_minutes: newSettings.intervalMinutes,
       default_viewports: newSettings.viewports,
     }
     setSettings(updated)
+    checkForChanges(updated)
+  }
 
-    // Check if there are actual changes
+  const handleRetentionChange = (retentionSettings: RetentionSettings) => {
+    if (!settings) return
+
+    const updated: UserSettings = {
+      ...settings,
+      ...retentionSettings,
+    }
+    setSettings(updated)
+    checkForChanges(updated)
+  }
+
+  const checkForChanges = (updated: UserSettings) => {
+    if (!originalSettings) {
+      setHasChanges(false)
+      return
+    }
+
     const changed =
-      updated.default_interval_minutes !== originalSettings?.default_interval_minutes ||
-      JSON.stringify(updated.default_viewports) !== JSON.stringify(originalSettings?.default_viewports)
+      updated.default_interval_minutes !== originalSettings.default_interval_minutes ||
+      JSON.stringify(updated.default_viewports) !== JSON.stringify(originalSettings.default_viewports) ||
+      updated.retention_enabled !== originalSettings.retention_enabled ||
+      updated.max_screenshots_per_page !== originalSettings.max_screenshots_per_page ||
+      updated.keep_per_day !== originalSettings.keep_per_day ||
+      updated.keep_per_week !== originalSettings.keep_per_week ||
+      updated.keep_per_month !== originalSettings.keep_per_month ||
+      updated.keep_per_year !== originalSettings.keep_per_year ||
+      updated.max_age_days !== originalSettings.max_age_days
     setHasChanges(changed)
   }
 
@@ -179,7 +206,36 @@ export function SettingsPage() {
           <CaptureSettingsForm
             intervalMinutes={settings.default_interval_minutes}
             viewports={settings.default_viewports}
-            onChange={handleChange}
+            onChange={handleCaptureChange}
+            disabled={isSaving}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Screenshot Retention Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Icon name="delete_sweep" size="sm" />
+            Screenshot Retention
+          </CardTitle>
+          <CardDescription>
+            Automatically clean up old screenshots to save storage space. Uses a tiered retention
+            policy similar to backup rotation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RetentionSettingsForm
+            settings={{
+              retention_enabled: settings.retention_enabled,
+              max_screenshots_per_page: settings.max_screenshots_per_page,
+              keep_per_day: settings.keep_per_day,
+              keep_per_week: settings.keep_per_week,
+              keep_per_month: settings.keep_per_month,
+              keep_per_year: settings.keep_per_year,
+              max_age_days: settings.max_age_days,
+            }}
+            onChange={handleRetentionChange}
             disabled={isSaving}
           />
         </CardContent>

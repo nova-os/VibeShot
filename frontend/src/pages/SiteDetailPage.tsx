@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api, Site, Page } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,8 @@ import { PageCard, PageCardSkeleton } from '@/components/pages/PageCard'
 import { AddPageDialog } from '@/components/pages/AddPageDialog'
 import { DeleteSiteDialog } from '@/components/sites/DeleteSiteDialog'
 import { DiscoverPagesDialog } from '@/components/sites/DiscoverPagesDialog'
+import { EditSiteDialog } from '@/components/sites/EditSiteDialog'
+import { usePolling } from '@/hooks/usePolling'
 import { toast } from 'sonner'
 
 export function SiteDetailPage() {
@@ -18,6 +20,8 @@ export function SiteDetailPage() {
   const [addPageDialogOpen, setAddPageDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [discoverDialogOpen, setDiscoverDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const initialLoadDone = useRef(false)
 
   const loadData = useCallback(async () => {
     if (!siteId) return
@@ -30,15 +34,24 @@ export function SiteDetailPage() {
       setSite(siteData)
       setPages(pagesData)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load site')
+      // Only show error on initial load, not during polling
+      if (!initialLoadDone.current) {
+        toast.error(error instanceof Error ? error.message : 'Failed to load site')
+      }
     } finally {
       setIsLoading(false)
+      initialLoadDone.current = true
     }
   }, [siteId])
 
   useEffect(() => {
+    initialLoadDone.current = false
+    setIsLoading(true)
     loadData()
-  }, [loadData])
+  }, [siteId]) // Only reload when siteId changes
+
+  // Poll for updates every 30 seconds
+  usePolling(loadData, { enabled: !!siteId })
 
   if (isLoading) {
     return (
@@ -97,6 +110,10 @@ export function SiteDetailPage() {
             <Icon name="add" size="sm" />
             Add Page
           </Button>
+          <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
+            <Icon name="settings" size="sm" />
+            Settings
+          </Button>
           <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
             <Icon name="delete" size="sm" />
             Delete Site
@@ -150,6 +167,15 @@ export function SiteDetailPage() {
         onOpenChange={setDiscoverDialogOpen}
         site={site}
         onSuccess={loadData}
+      />
+
+      <EditSiteDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        site={site}
+        onSuccess={(updatedSite) => {
+          setSite(updatedSite)
+        }}
       />
     </div>
   )
