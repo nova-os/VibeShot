@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -24,8 +24,78 @@ interface AddPageDialogProps {
 export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPageDialogProps) {
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  const [intervalMinutes, setIntervalMinutes] = useState('360')
   const [isLoading, setIsLoading] = useState(false)
+  const [isResolvingTitle, setIsResolvingTitle] = useState(false)
+  const [nameWasManuallySet, setNameWasManuallySet] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Reset state when dialog opens/closes
+  useEffect(() => {
+    if (!open) {
+      setName('')
+      setUrl('')
+      setNameWasManuallySet(false)
+      setIsResolvingTitle(false)
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [open])
+
+  // Fetch page title when URL changes (with debounce)
+  useEffect(() => {
+    // Don't fetch if user manually set the name
+    if (nameWasManuallySet) return
+
+    // Validate URL
+    let isValidUrl = false
+    try {
+      const parsed = new URL(url)
+      isValidUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    } catch {
+      isValidUrl = false
+    }
+
+    if (!isValidUrl) {
+      return
+    }
+
+    // Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsResolvingTitle(true)
+      abortControllerRef.current = new AbortController()
+
+      try {
+        const { title } = await api.fetchPageTitle(url)
+        // Only update if user hasn't manually changed the name
+        if (!nameWasManuallySet) {
+          setName(title)
+        }
+      } catch {
+        // Silently ignore errors - user can still enter name manually
+      } finally {
+        setIsResolvingTitle(false)
+      }
+    }, 500) // 500ms debounce
+
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [url, nameWasManuallySet])
+
+  const handleNameChange = (value: string) => {
+    setName(value)
+    // Mark as manually set if user types something
+    if (value.trim()) {
+      setNameWasManuallySet(true)
+    } else {
+      setNameWasManuallySet(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,14 +103,13 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
 
     try {
       await api.createPage(siteId, {
-        name,
+        name: name.trim() || undefined,
         url,
-        interval_minutes: parseInt(intervalMinutes, 10),
       })
       toast.success('Page added successfully')
       setName('')
       setUrl('')
-      setIntervalMinutes('360')
+      setNameWasManuallySet(false)
       onOpenChange(false)
       onSuccess()
     } catch (error) {
@@ -62,17 +131,6 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="page-name">Page Name</Label>
-              <Input
-                id="page-name"
-                placeholder="Homepage"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="page-url">URL</Label>
               <Input
                 id="page-url"
@@ -85,18 +143,24 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="page-interval">Capture Interval (minutes)</Label>
-              <Input
-                id="page-interval"
-                type="number"
-                min="5"
-                value={intervalMinutes}
-                onChange={(e) => setIntervalMinutes(e.target.value)}
-                required
-                disabled={isLoading}
-              />
+              <Label htmlFor="page-name">Page Name</Label>
+              <div className="relative">
+                <Input
+                  id="page-name"
+                  placeholder={isResolvingTitle ? 'Detecting page title...' : 'Enter name or auto-detect from URL'}
+                  value={name}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  disabled={isLoading}
+                  className={isResolvingTitle ? 'pr-8' : ''}
+                />
+                {isResolvingTitle && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <Icon name="progress_activity" className="animate-spin text-muted-foreground" size="sm" />
+                  </div>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Default: 360 minutes (6 hours)
+                Auto-detected from URL, or enter a custom name
               </p>
             </div>
           </div>
@@ -104,7 +168,7 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
+            <Button type="submit" disabled={isLoading || isResolvingTitle}>
               {isLoading ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />

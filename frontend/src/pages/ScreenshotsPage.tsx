@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, Page, Screenshot, Instruction } from '@/lib/api'
+import { api, Page, Screenshot, Instruction, CaptureJob } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScreenshotCard, ScreenshotCardSkeleton } from '@/components/screenshots/ScreenshotCard'
@@ -47,6 +48,10 @@ export function ScreenshotsPage() {
   const [viewerId, setViewerId] = useState<number | null>(null)
   const [comparisonOpen, setComparisonOpen] = useState(false)
   const [deleteScreenshotsIds, setDeleteScreenshotsIds] = useState<number[]>([])
+
+  // Capture job tracking
+  const [captureJob, setCaptureJob] = useState<CaptureJob | null>(null)
+  const capturePollingRef = useRef<NodeJS.Timeout | null>(null)
 
   const loadData = useCallback(async () => {
     if (!pageId) return
@@ -127,16 +132,88 @@ export function ScreenshotsPage() {
     )
   }, [screenshots])
 
+  // Poll capture status
+  const pollCaptureStatus = useCallback(async () => {
+    if (!pageId) return
+    
+    try {
+      const { job } = await api.getCaptureStatus(parseInt(pageId, 10))
+      setCaptureJob(job)
+      
+      // If job completed or failed, reload screenshots and stop polling
+      if (job && (job.status === 'completed' || job.status === 'failed')) {
+        if (job.status === 'completed') {
+          loadScreenshots()
+        }
+        // Stop polling
+        if (capturePollingRef.current) {
+          clearInterval(capturePollingRef.current)
+          capturePollingRef.current = null
+        }
+      }
+    } catch (error) {
+      // Ignore polling errors
+    }
+  }, [pageId, loadScreenshots])
+
+  // Start/stop capture status polling based on active job
+  useEffect(() => {
+    const isActive = captureJob && (captureJob.status === 'pending' || captureJob.status === 'capturing')
+
+    if (isActive && !capturePollingRef.current) {
+      // Start polling every 2 seconds
+      capturePollingRef.current = setInterval(pollCaptureStatus, 2000)
+    } else if (!isActive && capturePollingRef.current) {
+      // Stop polling
+      clearInterval(capturePollingRef.current)
+      capturePollingRef.current = null
+    }
+
+    return () => {
+      if (capturePollingRef.current) {
+        clearInterval(capturePollingRef.current)
+        capturePollingRef.current = null
+      }
+    }
+  }, [captureJob, pollCaptureStatus])
+
+  // Load initial capture status
+  useEffect(() => {
+    if (pageId) {
+      api.getCaptureStatus(parseInt(pageId, 10))
+        .then(({ job }) => setCaptureJob(job))
+        .catch(() => {})
+    }
+  }, [pageId])
+
   const handleCaptureNow = async () => {
     if (!page) return
 
     try {
-      await api.triggerCapture(page.id)
+      const { jobId } = await api.triggerCapture(page.id)
       toast.success('Screenshot capture scheduled')
+      
+      // Start tracking the new job
+      setCaptureJob({
+        id: jobId,
+        status: 'pending',
+        current_viewport: null,
+        viewports_completed: 0,
+        viewports_total: 0,
+        error_message: null,
+        started_at: null,
+        completed_at: null,
+        created_at: new Date().toISOString(),
+      })
+      
+      // Start polling immediately
+      pollCaptureStatus()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to trigger capture')
     }
   }
+
+  const isCapturing = captureJob && (captureJob.status === 'pending' || captureJob.status === 'capturing')
 
   const handleSelectForCompare = (id: number) => {
     setSelectedIds(prev => {
@@ -266,11 +343,26 @@ export function ScreenshotsPage() {
           <p className="text-muted-foreground font-mono text-sm truncate">{page.url}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={handleCaptureNow}>
-            <Icon name="photo_camera" size="sm" />
-            Capture Now
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isCapturing ? (
+            <Badge variant="secondary" className="gap-2 h-9 px-4 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+              <Icon name="progress_activity" size="sm" className="animate-spin" />
+              {captureJob?.status === 'pending' ? (
+                'Waiting...'
+              ) : (
+                <>
+                  Capturing
+                  {captureJob?.viewports_total ? ` ${captureJob.viewports_completed+1}/${captureJob.viewports_total}` : ''}
+                  {captureJob?.current_viewport ? ` (${captureJob.current_viewport})` : ''}
+                </>
+              )}
+            </Badge>
+          ) : (
+            <Button onClick={handleCaptureNow}>
+              <Icon name="photo_camera" size="sm" />
+              Capture Now
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => setEditDialogOpen(true)}>
             <Icon name="edit" size="sm" />
             Edit

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, Site, Page } from '@/lib/api'
+import { api, Site, Page, CaptureJob } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { PageCard, PageCardSkeleton } from '@/components/pages/PageCard'
@@ -29,6 +29,10 @@ export function SiteDetailPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [deletePagesDialogOpen, setDeletePagesDialogOpen] = useState(false)
 
+  // Capture job tracking
+  const [captureJobs, setCaptureJobs] = useState<Map<number, CaptureJob>>(new Map())
+  const capturePollingRef = useRef<NodeJS.Timeout | null>(null)
+
   const loadData = useCallback(async () => {
     if (!siteId) return
 
@@ -49,6 +53,104 @@ export function SiteDetailPage() {
       initialLoadDone.current = true
     }
   }, [siteId])
+
+  // Poll capture status for pages with active jobs
+  const pollCaptureStatus = useCallback(async () => {
+    const activePageIds = Array.from(captureJobs.entries())
+      .filter(([, job]) => job.status === 'pending' || job.status === 'capturing')
+      .map(([pageId]) => pageId)
+    
+    if (activePageIds.length === 0) {
+      // No active jobs, stop polling
+      if (capturePollingRef.current) {
+        clearInterval(capturePollingRef.current)
+        capturePollingRef.current = null
+      }
+      return
+    }
+
+    // Fetch status for all active jobs
+    const statusPromises = activePageIds.map(pageId => 
+      api.getCaptureStatus(pageId).then(res => ({ pageId, job: res.job }))
+    )
+    
+    const results = await Promise.allSettled(statusPromises)
+    
+    setCaptureJobs(prev => {
+      const next = new Map(prev)
+      let hasCompletedJobs = false
+      
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value.job) {
+          const { pageId, job } = result.value
+          next.set(pageId, job)
+          
+          // Check if job just completed
+          if (job.status === 'completed' || job.status === 'failed') {
+            hasCompletedJobs = true
+          }
+        }
+      }
+      
+      // Reload page data if any jobs completed
+      if (hasCompletedJobs) {
+        loadData()
+      }
+      
+      return next
+    })
+  }, [captureJobs, loadData])
+
+  // Start/stop capture status polling based on active jobs
+  useEffect(() => {
+    const hasActiveJobs = Array.from(captureJobs.values()).some(
+      job => job.status === 'pending' || job.status === 'capturing'
+    )
+
+    if (hasActiveJobs && !capturePollingRef.current) {
+      // Start polling every 2 seconds
+      pollCaptureStatus()
+      capturePollingRef.current = setInterval(pollCaptureStatus, 2000)
+    } else if (!hasActiveJobs && capturePollingRef.current) {
+      // Stop polling
+      clearInterval(capturePollingRef.current)
+      capturePollingRef.current = null
+    }
+
+    return () => {
+      if (capturePollingRef.current) {
+        clearInterval(capturePollingRef.current)
+        capturePollingRef.current = null
+      }
+    }
+  }, [captureJobs, pollCaptureStatus])
+
+  // Load initial capture status for all pages
+  useEffect(() => {
+    if (pages.length === 0) return
+    
+    const loadCaptureStatuses = async () => {
+      const statusPromises = pages.map(page => 
+        api.getCaptureStatus(page.id)
+          .then(res => ({ pageId: page.id, job: res.job }))
+          .catch(() => ({ pageId: page.id, job: null }))
+      )
+      
+      const results = await Promise.all(statusPromises)
+      
+      setCaptureJobs(prev => {
+        const next = new Map(prev)
+        for (const { pageId, job } of results) {
+          if (job && (job.status === 'pending' || job.status === 'capturing' || job.status === 'failed')) {
+            next.set(pageId, job)
+          }
+        }
+        return next
+      })
+    }
+    
+    loadCaptureStatuses()
+  }, [pages])
 
   useEffect(() => {
     initialLoadDone.current = false
@@ -224,6 +326,7 @@ export function SiteDetailPage() {
               selectMode={selectMode}
               isSelected={selectedIds.has(page.id)}
               onSelect={handleSelect}
+              captureJob={captureJobs.get(page.id)}
             />
           ))}
         </div>

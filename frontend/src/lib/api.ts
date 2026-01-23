@@ -106,6 +106,27 @@ export interface AuthResponse {
   user: User
 }
 
+export interface CaptureJob {
+  id: number
+  status: 'pending' | 'capturing' | 'completed' | 'failed'
+  current_viewport: string | null
+  viewports_completed: number
+  viewports_total: number
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+export interface CaptureStatusResponse {
+  job: CaptureJob | null
+}
+
+export interface TriggerCaptureResponse {
+  message: string
+  jobId: number
+}
+
 // API Client
 const API_BASE = '/api'
 
@@ -237,7 +258,7 @@ class ApiClient {
     return this.request<Page>(`/pages/${id}`)
   }
 
-  async createPage(siteId: number, data: { name: string; url: string; interval_minutes?: number | null; viewports?: number[] | null }): Promise<Page> {
+  async createPage(siteId: number, data: { name?: string; url: string; interval_minutes?: number | null; viewports?: number[] | null }): Promise<Page> {
     return this.request<Page>(`/sites/${siteId}/pages`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -277,6 +298,19 @@ class ApiClient {
     })
   }
 
+  async resolvePageTitle(id: number): Promise<Page> {
+    return this.request<Page>(`/pages/${id}/resolve-title`, {
+      method: 'POST',
+    })
+  }
+
+  async fetchPageTitle(url: string): Promise<{ title: string }> {
+    return this.request<{ title: string }>('/pages/resolve-title', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    })
+  }
+
   async deletePages(ids: number[]): Promise<{ deletedCount: number }> {
     return this.request<{ deletedCount: number }>('/pages/batch', {
       method: 'DELETE',
@@ -284,10 +318,14 @@ class ApiClient {
     })
   }
 
-  async triggerCapture(pageId: number): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/pages/${pageId}/capture`, {
+  async triggerCapture(pageId: number): Promise<TriggerCaptureResponse> {
+    return this.request<TriggerCaptureResponse>(`/pages/${pageId}/capture`, {
       method: 'POST',
     })
+  }
+
+  async getCaptureStatus(pageId: number): Promise<CaptureStatusResponse> {
+    return this.request<CaptureStatusResponse>(`/pages/${pageId}/capture-status`)
   }
 
   // Screenshots endpoints

@@ -6,6 +6,7 @@ const router = express.Router();
 
 const WORKER_URL = process.env.WORKER_URL || 'http://worker:3001';
 
+
 // All routes require authentication
 router.use(authenticateToken);
 
@@ -270,14 +271,18 @@ router.post('/:id/pages/bulk', async (req, res) => {
 
     // Insert all pages (interval_minutes and viewports are null by default - uses user settings)
     const createdPages = [];
+    
     for (const page of pages) {
       const { url, name, interval_minutes = null, viewports = null } = page;
       
-      if (!url || !name) continue;
+      if (!url) continue;
+      
+      // Use URL as default name if not provided
+      const pageName = name && name.trim() ? name.trim() : url;
 
       const [result] = await db.query(
         'INSERT INTO pages (site_id, url, name, interval_minutes, viewports) VALUES (?, ?, ?, ?, ?)',
-        [req.params.id, url, name, interval_minutes, viewports ? JSON.stringify(viewports) : null]
+        [req.params.id, url, pageName, interval_minutes, viewports ? JSON.stringify(viewports) : null]
       );
 
       const [newPages] = await db.query('SELECT * FROM pages WHERE id = ?', [result.insertId]);
@@ -301,8 +306,8 @@ router.post('/:id/pages', async (req, res) => {
   try {
     const { url, name, interval_minutes = null, viewports = null } = req.body;
 
-    if (!url || !name) {
-      return res.status(400).json({ error: 'URL and name are required' });
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
     }
 
     // Verify ownership
@@ -315,9 +320,12 @@ router.post('/:id/pages', async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
+    // Use URL as default name if not provided
+    const pageName = name && name.trim() ? name.trim() : url;
+
     const [result] = await db.query(
       'INSERT INTO pages (site_id, url, name, interval_minutes, viewports) VALUES (?, ?, ?, ?, ?)',
-      [req.params.id, url, name, interval_minutes, viewports ? JSON.stringify(viewports) : null]
+      [req.params.id, url, pageName, interval_minutes, viewports ? JSON.stringify(viewports) : null]
     );
 
     const [pages] = await db.query('SELECT * FROM pages WHERE id = ?', [result.insertId]);

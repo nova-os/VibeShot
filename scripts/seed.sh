@@ -76,7 +76,7 @@ echo "📄 Adding pages..."
 curl -s -X POST "$API_URL/api/sites/$SITE_ID/pages" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d '{"name":"Homepage","url":"https://www.heise.de/","interval_minutes":360}' > /dev/null
+    -d '{"name":"Homepage","url":"https://www.heise.de/"}' > /dev/null
 
 echo "   ✅ Homepage added"
 
@@ -84,7 +84,7 @@ echo "   ✅ Homepage added"
 curl -s -X POST "$API_URL/api/sites/$SITE_ID/pages" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d '{"name":"Newsticker","url":"https://www.heise.de/newsticker/","interval_minutes":360}' > /dev/null
+    -d '{"name":"Newsticker","url":"https://www.heise.de/newsticker/"}' > /dev/null
 
 echo "   ✅ Newsticker added"
 

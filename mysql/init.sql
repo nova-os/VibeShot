@@ -95,3 +95,20 @@ CREATE TABLE IF NOT EXISTS instructions (
     INDEX idx_page_id (page_id),
     INDEX idx_execution_order (execution_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Capture jobs table (tracks screenshot capture progress for UI feedback)
+CREATE TABLE IF NOT EXISTS capture_jobs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    page_id INT NOT NULL,
+    status ENUM('pending', 'capturing', 'completed', 'failed') NOT NULL DEFAULT 'pending',
+    current_viewport VARCHAR(20) NULL,
+    viewports_completed INT NOT NULL DEFAULT 0,
+    viewports_total INT NOT NULL DEFAULT 0,
+    error_message TEXT NULL,
+    started_at TIMESTAMP NULL,
+    completed_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+    INDEX idx_page_status (page_id, status),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

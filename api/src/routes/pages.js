@@ -31,6 +31,77 @@ async function callWorkerApi(endpoint, body) {
   return response.json();
 }
 
+/**
+ * Fetch page title from a URL using a simple HTTP request
+ * @param {string} url - The URL to fetch
+ * @returns {Promise<string|null>} The page title or null if not found
+ */
+async function fetchPageTitle(url) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const html = await response.text();
+    
+    // Extract title from HTML using regex (simple approach without DOM parser)
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch && titleMatch[1]) {
+      const title = titleMatch[1].trim();
+      // Decode HTML entities
+      const decoded = title
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, ' ');
+      
+      if (decoded.length > 0 && decoded.length <= 255) {
+        return decoded;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.log(`Failed to fetch page title for ${url}:`, error.message);
+    return null;
+  }
+}
+
+// Fetch page title from URL (for previewing before creating)
+router.post('/resolve-title', async (req, res) => {
+  try {
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    const title = await fetchPageTitle(url);
+    
+    if (!title) {
+      return res.status(404).json({ error: 'Could not fetch page title' });
+    }
+
+    res.json({ title });
+  } catch (error) {
+    console.error('Resolve title error:', error);
+    res.status(500).json({ error: 'Failed to resolve page title' });
+  }
+});
+
 // Batch delete pages (must be before /:id routes)
 router.delete('/batch', async (req, res) => {
   try {
@@ -162,6 +233,39 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Resolve page title from URL
+router.post('/:id/resolve-title', async (req, res) => {
+  try {
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    const title = await fetchPageTitle(page.url);
+    
+    if (!title) {
+      return res.status(404).json({ error: 'Could not fetch page title' });
+    }
+
+    // Update the page name
+    await db.query('UPDATE pages SET name = ? WHERE id = ?', [title, page.id]);
+
+    // Return the updated page
+    const [pages] = await db.query('SELECT * FROM pages WHERE id = ?', [page.id]);
+    const updatedPage = pages[0];
+    
+    // Parse viewports if it's a string
+    if (updatedPage.viewports && typeof updatedPage.viewports === 'string') {
+      updatedPage.viewports = JSON.parse(updatedPage.viewports);
+    }
+
+    res.json(updatedPage);
+  } catch (error) {
+    console.error('Resolve title error:', error);
+    res.status(500).json({ error: 'Failed to resolve page title' });
+  }
+});
+
 // Delete page
 router.delete('/:id', async (req, res) => {
   try {
@@ -250,16 +354,70 @@ router.post('/:id/capture', async (req, res) => {
       return res.status(404).json({ error: 'Page not found' });
     }
 
+    // Check if there's already a pending or capturing job for this page
+    const [existingJobs] = await db.query(
+      `SELECT id FROM capture_jobs 
+       WHERE page_id = ? AND status IN ('pending', 'capturing')`,
+      [req.params.id]
+    );
+
+    if (existingJobs.length > 0) {
+      return res.json({ 
+        message: 'Capture already in progress',
+        jobId: existingJobs[0].id 
+      });
+    }
+
+    // Create a pending capture job
+    const [jobResult] = await db.query(
+      `INSERT INTO capture_jobs (page_id, status) VALUES (?, 'pending')`,
+      [req.params.id]
+    );
+
     // Set last_screenshot_at to null to trigger immediate capture by worker
     await db.query(
       'UPDATE pages SET last_screenshot_at = NULL WHERE id = ?',
       [req.params.id]
     );
 
-    res.json({ message: 'Screenshot capture scheduled' });
+    res.json({ 
+      message: 'Screenshot capture scheduled',
+      jobId: jobResult.insertId 
+    });
   } catch (error) {
     console.error('Trigger capture error:', error);
     res.status(500).json({ error: 'Failed to trigger capture' });
+  }
+});
+
+// Get capture status for a page
+router.get('/:id/capture-status', async (req, res) => {
+  try {
+    // Verify ownership
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Get the latest capture job for this page
+    const [jobs] = await db.query(
+      `SELECT id, status, current_viewport, viewports_completed, viewports_total, 
+              error_message, started_at, completed_at, created_at
+       FROM capture_jobs 
+       WHERE page_id = ? 
+       ORDER BY created_at DESC 
+       LIMIT 1`,
+      [req.params.id]
+    );
+
+    if (jobs.length === 0) {
+      return res.json({ job: null });
+    }
+
+    res.json({ job: jobs[0] });
+  } catch (error) {
+    console.error('Get capture status error:', error);
+    res.status(500).json({ error: 'Failed to get capture status' });
   }
 });
 

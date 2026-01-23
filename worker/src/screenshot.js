@@ -39,6 +39,17 @@ function getViewportHeight(name) {
  * @returns {Object} Object containing screenshot results and instruction execution results
  */
 async function captureScreenshots(browser, page) {
+  return captureScreenshotsWithProgress(browser, page, null);
+}
+
+/**
+ * Capture screenshots for all viewports with progress callback
+ * @param {Browser} browser - Puppeteer browser instance
+ * @param {Object} page - Page object from database (includes instructions array and effective_viewports)
+ * @param {Function|null} onProgress - Callback function(viewportName, completed, total) called after each viewport
+ * @returns {Object} Object containing screenshot results and instruction execution results
+ */
+async function captureScreenshotsWithProgress(browser, page, onProgress) {
   const screenshotResults = [];
   const instructionResults = [];
   
@@ -47,8 +58,11 @@ async function captureScreenshots(browser, page) {
   
   // Sort widths descending (desktop first) for consistent ordering
   const sortedWidths = [...viewportWidths].sort((a, b) => b - a);
+  const totalViewports = sortedWidths.length;
   
   let isFirstViewport = true;
+  let completedViewports = 0;
+  
   for (const width of sortedWidths) {
     const viewportName = getViewportName(width);
     const viewport = {
@@ -57,16 +71,35 @@ async function captureScreenshots(browser, page) {
       height: getViewportHeight(viewportName)
     };
     
+    // Report progress at start of viewport capture
+    if (onProgress) {
+      try {
+        await onProgress(viewportName, completedViewports, totalViewports);
+      } catch (e) {
+        // Ignore progress callback errors
+      }
+    }
+    
     try {
       console.log(`Screenshot: Capturing ${viewport.name} viewport (${viewport.width}px) for ${page.url}`);
       const { screenshot, instructions } = await captureScreenshotForViewport(browser, page, viewport);
       screenshotResults.push(screenshot);
+      completedViewports++;
       
       // Collect instruction results (only from first viewport to avoid duplicates)
       if (isFirstViewport && instructions) {
         instructionResults.push(...instructions);
       }
       isFirstViewport = false;
+      
+      // Report progress after viewport complete
+      if (onProgress) {
+        try {
+          await onProgress(viewportName, completedViewports, totalViewports);
+        } catch (e) {
+          // Ignore progress callback errors
+        }
+      }
     } catch (error) {
       console.error(`Screenshot: Failed to capture ${viewport.name} viewport (${width}px):`, error.message);
       // Continue with other viewports even if one fails
@@ -632,4 +665,4 @@ async function autoScroll(page) {
 }
 
 // Export functions
-module.exports = { captureScreenshots, captureScreenshotForViewport, executeInstructions, getViewportName, DEFAULT_VIEWPORTS };
+module.exports = { captureScreenshots, captureScreenshotsWithProgress, captureScreenshotForViewport, executeInstructions, getViewportName, DEFAULT_VIEWPORTS };
