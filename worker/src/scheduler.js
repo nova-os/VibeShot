@@ -101,7 +101,7 @@ class Scheduler {
       const pages = await this.getPagesNeedingCapture();
       
       if (pages.length === 0) {
-        console.log('Scheduler: No pages need capturing');
+        // console.log('Scheduler: No pages need capturing');
         return;
       }
 
@@ -267,32 +267,31 @@ class Scheduler {
         };
         
         // Capture screenshots for all viewports with progress tracking
-        const { screenshots, instructionResults, testResults } = await captureScreenshotsWithProgress(
+        const { screenshots, instructionResults, testResultsByViewport } = await captureScreenshotsWithProgress(
           browser, 
           page, 
           onProgress
         );
         
-        // Save all screenshots to database (including errors) and collect screenshot IDs
-        const screenshotIds = [];
+        // Save all screenshots to database (including errors) and save test results per viewport
         for (const result of screenshots) {
           const screenshotId = await this.saveScreenshot(page.id, result);
-          screenshotIds.push(screenshotId);
           
           // Save any captured errors
           if (result.errors && result.errors.length > 0) {
             await this.saveScreenshotErrors(screenshotId, result.errors);
+          }
+          
+          // Save test results for this viewport's screenshot
+          const viewportTestResults = testResultsByViewport[result.viewport];
+          if (viewportTestResults && viewportTestResults.length > 0) {
+            await this.saveTestResults(viewportTestResults, screenshotId);
           }
         }
         
         // Save instruction execution results (errors and successes)
         if (instructionResults && instructionResults.length > 0) {
           await this.saveInstructionResults(instructionResults);
-        }
-        
-        // Save test results (link to first screenshot of the capture batch)
-        if (testResults && testResults.length > 0 && screenshotIds.length > 0) {
-          await this.saveTestResults(testResults, screenshotIds[0]);
         }
         
         // Update last_screenshot_at

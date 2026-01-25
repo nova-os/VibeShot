@@ -52,7 +52,8 @@ async function captureScreenshots(browser, page) {
 async function captureScreenshotsWithProgress(browser, page, onProgress) {
   const screenshotResults = [];
   const instructionResults = [];
-  const testResults = [];
+  // testResultsByViewport: { 'desktop': [...], 'tablet': [...], 'mobile': [...] }
+  const testResultsByViewport = {};
   
   // Get viewports from page settings (effective_viewports is resolved by scheduler)
   const viewportWidths = page.effective_viewports || DEFAULT_VIEWPORTS;
@@ -87,15 +88,16 @@ async function captureScreenshotsWithProgress(browser, page, onProgress) {
       screenshotResults.push(screenshot);
       completedViewports++;
       
-      // Collect instruction and test results (only from first viewport to avoid duplicates)
-      if (isFirstViewport) {
-        if (instructions) {
-          instructionResults.push(...instructions);
-        }
-        if (tests) {
-          testResults.push(...tests);
-        }
+      // Collect instruction results (only from first viewport to avoid duplicates)
+      if (isFirstViewport && instructions) {
+        instructionResults.push(...instructions);
       }
+      
+      // Collect test results for each viewport (tests can be viewport-specific)
+      if (tests && tests.length > 0) {
+        testResultsByViewport[viewportName] = tests;
+      }
+      
       isFirstViewport = false;
       
       // Report progress after viewport complete
@@ -112,7 +114,7 @@ async function captureScreenshotsWithProgress(browser, page, onProgress) {
     }
   }
   
-  return { screenshots: screenshotResults, instructionResults, testResults };
+  return { screenshots: screenshotResults, instructionResults, testResultsByViewport };
 }
 
 /**
