@@ -7,7 +7,7 @@ node_modules/
 .env.*.local
 
 # Screenshots storage
-screenshots/
+/screenshots/
 
 # Logs
 *.log
@@ -35,6 +35,6 @@ data/
 .vite/
 
 # React build output (generated files - rebuild with: cd frontend && npm run build)
-api/public/assets/
-api/public/index.html
-api/public/vite.svg
+/api/public/assets/
+/api/public/index.html
+/api/public/vite.svg
