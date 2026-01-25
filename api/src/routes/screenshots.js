@@ -69,13 +69,15 @@ router.delete('/batch', async (req, res) => {
   }
 });
 
-// Get screenshot metadata (includes error counts)
+// Get screenshot metadata (includes error counts and test results)
 router.get('/:id', async (req, res) => {
   try {
     const [screenshots] = await db.query(
       `SELECT sc.*,
               COALESCE(error_counts.js_error_count, 0) as js_error_count,
-              COALESCE(error_counts.network_error_count, 0) as network_error_count
+              COALESCE(error_counts.network_error_count, 0) as network_error_count,
+              COALESCE(test_counts.tests_passed, 0) as tests_passed,
+              COALESCE(test_counts.tests_failed, 0) as tests_failed
        FROM screenshots sc
        JOIN pages p ON sc.page_id = p.id
        JOIN sites s ON p.site_id = s.id
@@ -86,6 +88,13 @@ router.get('/:id', async (req, res) => {
          FROM screenshot_errors
          GROUP BY screenshot_id
        ) error_counts ON sc.id = error_counts.screenshot_id
+       LEFT JOIN (
+         SELECT screenshot_id,
+                SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as tests_passed,
+                SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) as tests_failed
+         FROM test_results
+         GROUP BY screenshot_id
+       ) test_counts ON sc.id = test_counts.screenshot_id
        WHERE sc.id = ? AND s.user_id = ?`,
       [req.params.id, req.user.id]
     );
@@ -156,6 +165,62 @@ router.get('/:id/errors', async (req, res) => {
   } catch (error) {
     console.error('Get screenshot errors:', error);
     res.status(500).json({ error: 'Failed to get screenshot errors' });
+  }
+});
+
+// Get test results for a screenshot
+router.get('/:id/test-results', async (req, res) => {
+  try {
+    // Verify ownership first
+    const [screenshots] = await db.query(
+      `SELECT sc.id FROM screenshots sc
+       JOIN pages p ON sc.page_id = p.id
+       JOIN sites s ON p.site_id = s.id
+       WHERE sc.id = ? AND s.user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+
+    if (screenshots.length === 0) {
+      return res.status(404).json({ error: 'Screenshot not found' });
+    }
+
+    // Get all test results for this screenshot
+    const [results] = await db.query(
+      `SELECT tr.id, tr.test_id, tr.passed, tr.message, tr.execution_time_ms, tr.created_at,
+              t.name as test_name, t.prompt as test_prompt
+       FROM test_results tr
+       JOIN tests t ON tr.test_id = t.id
+       WHERE tr.screenshot_id = ?
+       ORDER BY t.execution_order ASC`,
+      [req.params.id]
+    );
+
+    // Format results
+    const testResults = results.map(r => ({
+      id: r.id,
+      testId: r.test_id,
+      testName: r.test_name,
+      testPrompt: r.test_prompt,
+      passed: r.passed === 1,
+      message: r.message,
+      executionTimeMs: r.execution_time_ms,
+      createdAt: r.created_at
+    }));
+
+    const passed = testResults.filter(r => r.passed).length;
+    const failed = testResults.length - passed;
+
+    res.json({
+      testResults,
+      summary: {
+        total: testResults.length,
+        passed,
+        failed
+      }
+    });
+  } catch (error) {
+    console.error('Get screenshot test results:', error);
+    res.status(500).json({ error: 'Failed to get test results' });
   }
 });
 

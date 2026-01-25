@@ -1,15 +1,17 @@
 const express = require('express');
 const ScriptGenerator = require('./script-generator');
+const TestGenerator = require('./test-generator');
 const PageDiscovery = require('./page-discovery');
 
 /**
- * Worker HTTP API - Provides endpoints for script generation and page discovery
+ * Worker HTTP API - Provides endpoints for script generation, test generation, and page discovery
  * This API is internal and should only be called by the main API server.
  */
 class WorkerApi {
   constructor(browserPool) {
     this.browserPool = browserPool;
     this.scriptGenerator = new ScriptGenerator(browserPool);
+    this.testGenerator = new TestGenerator(browserPool);
     this.pageDiscovery = new PageDiscovery(browserPool);
     this.app = express();
     this.server = null;
@@ -38,7 +40,7 @@ class WorkerApi {
       });
     });
 
-    // Generate script endpoint
+    // Generate script endpoint (for instructions/actions)
     this.app.post('/generate-script', async (req, res) => {
       const { pageUrl, prompt, viewport } = req.body;
 
@@ -66,6 +68,42 @@ class WorkerApi {
         }
       } catch (error) {
         console.error('WorkerAPI: Generate script error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Generate test endpoint (for assertions/tests)
+    this.app.post('/generate-test', async (req, res) => {
+      const { pageUrl, prompt, viewport } = req.body;
+
+      if (!pageUrl || !prompt) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: pageUrl and prompt' 
+        });
+      }
+
+      try {
+        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport });
+        
+        if (result.success) {
+          res.json({
+            success: true,
+            script: result.script,
+            explanation: result.explanation,
+            warning: result.warning,
+            validationResult: result.validationResult
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: result.error
+          });
+        }
+      } catch (error) {
+        console.error('WorkerAPI: Generate test error:', error);
         res.status(500).json({
           success: false,
           error: error.message

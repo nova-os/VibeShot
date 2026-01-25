@@ -61,6 +61,9 @@ export interface Screenshot {
   // Error counts (from screenshot_errors table)
   js_error_count?: number
   network_error_count?: number
+  // Test result counts (from test_results table)
+  tests_passed?: number
+  tests_failed?: number
 }
 
 export interface JsError {
@@ -103,6 +106,40 @@ export interface Instruction {
   error_count: number
   created_at: string
   generationError?: string
+}
+
+export interface Test {
+  id: number
+  page_id: number
+  name: string
+  prompt: string
+  script: string | null
+  is_active: boolean
+  execution_order: number
+  viewports: string[] | null  // null = all viewports, or array like ["desktop", "mobile"]
+  created_at: string
+  updated_at: string
+  generationError?: string
+}
+
+export interface TestResult {
+  id: number
+  testId: number
+  testName: string
+  testPrompt: string
+  passed: boolean
+  message: string | null
+  executionTimeMs: number | null
+  createdAt: string
+}
+
+export interface TestResultsResponse {
+  testResults: TestResult[]
+  summary: {
+    total: number
+    passed: number
+    failed: number
+  }
 }
 
 export interface ComparisonStats {
@@ -459,6 +496,60 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify({ instructionIds }),
     })
+  }
+
+  // Tests endpoints
+  async getTests(pageId: number): Promise<Test[]> {
+    return this.request<Test[]>(`/pages/${pageId}/tests`)
+  }
+
+  async createTest(
+    pageId: number,
+    data: { name: string; prompt: string; viewport?: string; viewports?: string[] }
+  ): Promise<Test> {
+    return this.request<Test>(`/pages/${pageId}/tests`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateTest(
+    pageId: number,
+    testId: number,
+    data: Partial<Pick<Test, 'name' | 'prompt' | 'is_active' | 'script' | 'viewports'>>
+  ): Promise<Test> {
+    return this.request<Test>(`/pages/${pageId}/tests/${testId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteTest(pageId: number, testId: number): Promise<void> {
+    return this.request<void>(`/pages/${pageId}/tests/${testId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async regenerateTest(
+    pageId: number,
+    testId: number,
+    options?: { viewport?: string }
+  ): Promise<Test> {
+    return this.request<Test>(`/pages/${pageId}/tests/${testId}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    })
+  }
+
+  async reorderTests(pageId: number, testIds: number[]): Promise<Test[]> {
+    return this.request<Test[]>(`/pages/${pageId}/tests/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ testIds }),
+    })
+  }
+
+  async getScreenshotTestResults(screenshotId: number): Promise<TestResultsResponse> {
+    return this.request<TestResultsResponse>(`/screenshots/${screenshotId}/test-results`)
   }
 }
 

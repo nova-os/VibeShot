@@ -76,7 +76,7 @@ const geminiTools = [{
   }))
 }];
 
-// System prompt for script generation
+// System prompt for script generation (instructions/actions)
 const SYSTEM_PROMPT = `You are an expert at web automation and DOM manipulation. Your task is to generate JavaScript code that performs a specific action on a webpage.
 
 You have tools to explore the page:
@@ -105,6 +105,86 @@ const element = document.querySelector('#menu-toggle');
 if (element) {
   element.click();
 }`;
+
+// System prompt for test generation (assertions)
+const TEST_SYSTEM_PROMPT = `You are an expert at web testing and DOM assertions. Your task is to generate JavaScript test code that verifies conditions on a webpage.
+
+You have tools to explore the page:
+- getAccessibilityTree: See the full page structure
+- querySelector: Test if a CSS selector works
+- getElementDetails: Get info about specific elements
+- getClickableElements: Find all interactive elements
+
+Process:
+1. First, understand what the user wants to test/verify
+2. Use tools to explore the page and find the relevant elements
+3. Test selectors to make sure they work
+4. Generate the final test script using generateScript
+
+CRITICAL: The generated script MUST return an object with this exact structure:
+{ passed: boolean, message: string }
+
+Guidelines for the generated test script:
+- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
+- ALWAYS return { passed: true/false, message: "..." }
+- Provide helpful, descriptive failure messages that explain what was expected vs what was found
+- Check for element existence before accessing properties
+- Keep the test focused on a single assertion or related group of assertions
+- Do NOT use setTimeout or async operations - the script should be synchronous
+- Do NOT make fetch requests or load external resources
+- Do NOT use alert, confirm, or prompt
+- Wrap the entire script in an IIFE that returns the result
+
+Example test scripts:
+
+1. Check if element exists:
+(function() {
+  const element = document.querySelector('#login-button');
+  if (!element) {
+    return { passed: false, message: 'Login button not found on page' };
+  }
+  return { passed: true, message: 'Login button exists' };
+})();
+
+2. Check element text content:
+(function() {
+  const header = document.querySelector('h1');
+  if (!header) {
+    return { passed: false, message: 'No h1 element found on page' };
+  }
+  const text = header.textContent.trim();
+  const expected = 'Welcome';
+  if (text.includes(expected)) {
+    return { passed: true, message: 'Header contains expected text: "' + expected + '"' };
+  }
+  return { passed: false, message: 'Header text mismatch. Expected to contain: "' + expected + '", but found: "' + text + '"' };
+})();
+
+3. Check element visibility:
+(function() {
+  const modal = document.querySelector('.modal');
+  if (!modal) {
+    return { passed: false, message: 'Modal element not found' };
+  }
+  const style = window.getComputedStyle(modal);
+  const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+  if (isVisible) {
+    return { passed: true, message: 'Modal is visible' };
+  }
+  return { passed: false, message: 'Modal exists but is not visible (display: ' + style.display + ', visibility: ' + style.visibility + ')' };
+})();
+
+4. Check form field value:
+(function() {
+  const input = document.querySelector('input[name="email"]');
+  if (!input) {
+    return { passed: false, message: 'Email input field not found' };
+  }
+  if (input.value && input.value.length > 0) {
+    return { passed: true, message: 'Email field has value: "' + input.value + '"' };
+  }
+  return { passed: false, message: 'Email field is empty' };
+})();`;
 
 /**
  * Execute a tool call using the Puppeteer page
@@ -304,13 +384,15 @@ async function getClickableElements(page) {
 }
 
 /**
- * Generate a script using Gemini with tool use
+ * Internal function to generate script with specified system prompt
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
+ * @param {string} systemPrompt - The system prompt to use
+ * @param {string} taskDescription - Description for the initial message
  * @returns {object} Generated script or error
  */
-async function generateScript(page, prompt, pageUrl) {
+async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription) {
   if (!genAI) {
     return { error: 'Gemini API key not configured' };
   }
@@ -319,7 +401,7 @@ async function generateScript(page, prompt, pageUrl) {
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-3-pro-preview',
       tools: geminiTools,
-      systemInstruction: SYSTEM_PROMPT
+      systemInstruction: systemPrompt
     });
 
     // Start conversation with context
@@ -329,7 +411,7 @@ async function generateScript(page, prompt, pageUrl) {
 
     // Initial message with the task
     let response = await chat.sendMessage(
-      `Page URL: ${pageUrl}\n\nUser instruction: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`
+      `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`
     );
 
     // Tool use loop (max 10 iterations to prevent infinite loops)
@@ -385,8 +467,43 @@ async function generateScript(page, prompt, pageUrl) {
   }
 }
 
+/**
+ * Generate an action script using Gemini with tool use
+ * @param {Page} page - Puppeteer page instance
+ * @param {string} prompt - User's natural language instruction
+ * @param {string} pageUrl - URL of the page (for context)
+ * @returns {object} Generated script or error
+ */
+async function generateScript(page, prompt, pageUrl) {
+  return generateScriptWithPrompt(
+    page, 
+    prompt, 
+    pageUrl, 
+    SYSTEM_PROMPT, 
+    'User instruction'
+  );
+}
+
+/**
+ * Generate a test script using Gemini with tool use
+ * @param {Page} page - Puppeteer page instance
+ * @param {string} prompt - User's natural language test description
+ * @param {string} pageUrl - URL of the page (for context)
+ * @returns {object} Generated test script or error
+ */
+async function generateTestScript(page, prompt, pageUrl) {
+  return generateScriptWithPrompt(
+    page, 
+    prompt, 
+    pageUrl, 
+    TEST_SYSTEM_PROMPT, 
+    'Test to verify'
+  );
+}
+
 module.exports = {
   generateScript,
+  generateTestScript,
   executeTool,
   tools
 };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, Screenshot, ScreenshotErrorsResponse, JsError, NetworkError } from '@/lib/api'
+import { api, Screenshot, ScreenshotErrorsResponse, TestResultsResponse, JsError, NetworkError, TestResult } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
@@ -23,6 +23,9 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
   const [errorsData, setErrorsData] = useState<ScreenshotErrorsResponse | null>(null)
   const [showErrors, setShowErrors] = useState(false)
   const [loadingErrors, setLoadingErrors] = useState(false)
+  const [testResultsData, setTestResultsData] = useState<TestResultsResponse | null>(null)
+  const [showTestResults, setShowTestResults] = useState(false)
+  const [loadingTestResults, setLoadingTestResults] = useState(false)
 
   const totalErrors = Number(screenshot?.js_error_count || 0) + Number(screenshot?.network_error_count || 0)
 
@@ -54,11 +57,31 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
     }
   }, [showErrors, errorsData, screenshotId, loadingErrors])
 
+  // Load test results when panel is opened
+  useEffect(() => {
+    if (showTestResults && !testResultsData && !loadingTestResults) {
+      setLoadingTestResults(true)
+      api.getScreenshotTestResults(screenshotId)
+        .then(data => setTestResultsData(data))
+        .catch(err => console.error('Failed to load test results:', err))
+        .finally(() => setLoadingTestResults(false))
+    }
+  }, [showTestResults, testResultsData, screenshotId, loadingTestResults])
+
+  // Load test results automatically on mount to get counts
+  useEffect(() => {
+    api.getScreenshotTestResults(screenshotId)
+      .then(data => setTestResultsData(data))
+      .catch(() => {}) // Silently fail - may not have any tests
+  }, [screenshotId])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showErrors) {
           setShowErrors(false)
+        } else if (showTestResults) {
+          setShowTestResults(false)
         } else {
           onClose()
         }
@@ -66,7 +89,7 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose, showErrors])
+  }, [onClose, showErrors, showTestResults])
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
@@ -95,11 +118,34 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
             <Button
               variant={showErrors ? "default" : "outline"}
               size="sm"
-              onClick={() => setShowErrors(!showErrors)}
+              onClick={() => {
+                setShowErrors(!showErrors)
+                if (!showErrors) setShowTestResults(false)
+              }}
               className="gap-2"
             >
               <Icon name="warning" size="sm" />
               {totalErrors} Error{totalErrors !== 1 ? 's' : ''}
+            </Button>
+          )}
+          
+          {/* Test results indicator button */}
+          {testResultsData && testResultsData.summary.total > 0 && (
+            <Button
+              variant={showTestResults ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setShowTestResults(!showTestResults)
+                if (!showTestResults) setShowErrors(false)
+              }}
+              className={cn(
+                "gap-2",
+                testResultsData.summary.failed > 0 && !showTestResults && "border-destructive text-destructive hover:bg-destructive/10",
+                testResultsData.summary.failed === 0 && !showTestResults && "border-green-500 text-green-500 hover:bg-green-500/10"
+              )}
+            >
+              <Icon name={testResultsData.summary.failed > 0 ? "cancel" : "check_circle"} size="sm" />
+              {testResultsData.summary.passed}/{testResultsData.summary.total} Tests
             </Button>
           )}
         </div>
@@ -111,7 +157,7 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
       {/* Main content area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Image */}
-        <ScrollArea className={cn("flex-1 transition-all", showErrors && "flex-[2]")}>
+        <ScrollArea className={cn("flex-1 transition-all", (showErrors || showTestResults) && "flex-[2]")}>
           <div className="p-6 flex justify-center">
             <img
               src={api.getScreenshotImageUrl(screenshotId)}
@@ -173,6 +219,58 @@ export function ScreenshotViewer({ screenshotId, onClose }: ScreenshotViewerProp
                     {errorsData.totalErrors === 0 && (
                       <div className="text-center text-muted-foreground py-8">
                         No errors captured
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Test Results Panel */}
+        {showTestResults && (
+          <div className="w-[400px] border-l border-border bg-background/80 backdrop-blur flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h3 className="font-semibold">Test Results</h3>
+              <Button variant="ghost" size="sm" onClick={() => setShowTestResults(false)}>
+                <Icon name="close" size="sm" />
+              </Button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto">
+              <div className="p-4 space-y-4">
+                {loadingTestResults ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Icon name="progress_activity" className="animate-spin mr-2" />
+                    Loading test results...
+                  </div>
+                ) : testResultsData ? (
+                  <>
+                    {/* Summary */}
+                    <div className="flex items-center gap-4 p-3 rounded-md bg-muted/50">
+                      <div className="flex items-center gap-2 text-green-500">
+                        <Icon name="check_circle" size="sm" />
+                        <span className="font-semibold">{testResultsData.summary.passed} Passed</span>
+                      </div>
+                      {testResultsData.summary.failed > 0 && (
+                        <div className="flex items-center gap-2 text-destructive">
+                          <Icon name="cancel" size="sm" />
+                          <span className="font-semibold">{testResultsData.summary.failed} Failed</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Test Results */}
+                    <div className="space-y-3">
+                      {testResultsData.testResults.map((result: TestResult) => (
+                        <TestResultCard key={result.id} result={result} />
+                      ))}
+                    </div>
+
+                    {testResultsData.summary.total === 0 && (
+                      <div className="text-center text-muted-foreground py-8">
+                        No tests were run for this screenshot
                       </div>
                     )}
                   </>
@@ -253,6 +351,56 @@ function ErrorCard({ error, type }: ErrorCardProps) {
       {networkError.resourceType && (
         <div className="text-xs text-muted-foreground mt-0.5">
           Resource: {networkError.resourceType}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface TestResultCardProps {
+  result: TestResult
+}
+
+function TestResultCard({ result }: TestResultCardProps) {
+  const [expanded, setExpanded] = useState(false)
+  
+  return (
+    <div 
+      className={cn(
+        "rounded-md p-3 text-sm cursor-pointer transition-colors",
+        result.passed 
+          ? "bg-green-500/10 border border-green-500/20 hover:bg-green-500/15" 
+          : "bg-destructive/10 border border-destructive/20 hover:bg-destructive/15"
+      )}
+      onClick={() => setExpanded(!expanded)}
+    >
+      <div className="flex items-center gap-2">
+        <Icon 
+          name={result.passed ? "check_circle" : "cancel"} 
+          size="sm" 
+          className={result.passed ? "text-green-500" : "text-destructive"} 
+        />
+        <span className="font-medium">{result.testName}</span>
+        {result.executionTimeMs !== null && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            {result.executionTimeMs}ms
+          </span>
+        )}
+      </div>
+      
+      {result.message && (
+        <div className={cn(
+          "mt-2 text-sm",
+          result.passed ? "text-green-600 dark:text-green-400" : "text-destructive"
+        )}>
+          {result.message}
+        </div>
+      )}
+      
+      {expanded && result.testPrompt && (
+        <div className="mt-2 text-xs text-muted-foreground border-t border-border pt-2">
+          <span className="font-medium">Test: </span>
+          {result.testPrompt}
         </div>
       )}
     </div>

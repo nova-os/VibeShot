@@ -45,13 +45,14 @@ async function captureScreenshots(browser, page) {
 /**
  * Capture screenshots for all viewports with progress callback
  * @param {Browser} browser - Puppeteer browser instance
- * @param {Object} page - Page object from database (includes instructions array and effective_viewports)
+ * @param {Object} page - Page object from database (includes instructions array, tests array, and effective_viewports)
  * @param {Function|null} onProgress - Callback function(viewportName, completed, total) called after each viewport
- * @returns {Object} Object containing screenshot results and instruction execution results
+ * @returns {Object} Object containing screenshot results, instruction execution results, and test results
  */
 async function captureScreenshotsWithProgress(browser, page, onProgress) {
   const screenshotResults = [];
   const instructionResults = [];
+  const testResults = [];
   
   // Get viewports from page settings (effective_viewports is resolved by scheduler)
   const viewportWidths = page.effective_viewports || DEFAULT_VIEWPORTS;
@@ -82,13 +83,18 @@ async function captureScreenshotsWithProgress(browser, page, onProgress) {
     
     try {
       console.log(`Screenshot: Capturing ${viewport.name} viewport (${viewport.width}px) for ${page.url}`);
-      const { screenshot, instructions } = await captureScreenshotForViewport(browser, page, viewport);
+      const { screenshot, instructions, tests } = await captureScreenshotForViewport(browser, page, viewport);
       screenshotResults.push(screenshot);
       completedViewports++;
       
-      // Collect instruction results (only from first viewport to avoid duplicates)
-      if (isFirstViewport && instructions) {
-        instructionResults.push(...instructions);
+      // Collect instruction and test results (only from first viewport to avoid duplicates)
+      if (isFirstViewport) {
+        if (instructions) {
+          instructionResults.push(...instructions);
+        }
+        if (tests) {
+          testResults.push(...tests);
+        }
       }
       isFirstViewport = false;
       
@@ -106,7 +112,7 @@ async function captureScreenshotsWithProgress(browser, page, onProgress) {
     }
   }
   
-  return { screenshots: screenshotResults, instructionResults };
+  return { screenshots: screenshotResults, instructionResults, testResults };
 }
 
 /**
@@ -158,6 +164,105 @@ async function executeInstructions(browserPage, instructions, viewportName) {
 
   // Wait a bit more after all instructions for any animations/transitions
   await sleep(500);
+  
+  return results;
+}
+
+/**
+ * Check if a test should run on a given viewport
+ * @param {Object} test - Test object with optional viewports array
+ * @param {string} viewportName - Current viewport name (desktop, tablet, mobile)
+ * @returns {boolean} Whether the test should run on this viewport
+ */
+function shouldRunTestOnViewport(test, viewportName) {
+  // If no viewports specified (null or empty), run on all viewports
+  if (!test.viewports || test.viewports.length === 0) {
+    return true;
+  }
+  
+  // Parse viewports if it's a string (JSON from database)
+  let viewports = test.viewports;
+  if (typeof viewports === 'string') {
+    try {
+      viewports = JSON.parse(viewports);
+    } catch (e) {
+      return true; // If parsing fails, run on all viewports
+    }
+  }
+  
+  // Check if current viewport is in the list
+  return Array.isArray(viewports) && viewports.includes(viewportName);
+}
+
+/**
+ * Execute AI-generated tests on the page
+ * @param {Page} browserPage - Puppeteer page instance
+ * @param {Array} tests - Array of test objects with script property
+ * @param {string} viewportName - Current viewport name for logging
+ * @returns {Array} Array of test results with passed/failed status and messages
+ */
+async function executeTests(browserPage, tests, viewportName) {
+  const results = [];
+  
+  if (!tests || tests.length === 0) {
+    return results;
+  }
+
+  // Filter tests that are active, have a script, and should run on this viewport
+  const activeTests = tests.filter(t => 
+    t.is_active && 
+    t.script && 
+    shouldRunTestOnViewport(t, viewportName)
+  );
+  
+  if (activeTests.length === 0) {
+    return results;
+  }
+
+  console.log(`Screenshot: Running ${activeTests.length} test(s) (${viewportName})`);
+
+  for (const test of activeTests) {
+    const startTime = Date.now();
+    const result = {
+      testId: test.id,
+      name: test.name,
+      passed: false,
+      message: null,
+      executionTimeMs: 0
+    };
+    
+    try {
+      console.log(`Screenshot: Running test "${test.name}" (${viewportName})`);
+      const testResult = await browserPage.evaluate(test.script);
+      result.executionTimeMs = Date.now() - startTime;
+      
+      // Validate the test result structure
+      if (typeof testResult === 'object' && testResult !== null && typeof testResult.passed === 'boolean') {
+        result.passed = testResult.passed;
+        result.message = testResult.message || (testResult.passed ? 'Test passed' : 'Test failed');
+      } else {
+        result.passed = false;
+        result.message = 'Test script did not return { passed: boolean, message: string }';
+      }
+      
+      const status = result.passed ? 'PASSED' : 'FAILED';
+      console.log(`Screenshot: Test "${test.name}" ${status}: ${result.message} (${viewportName})`);
+    } catch (error) {
+      result.executionTimeMs = Date.now() - startTime;
+      const errorMessage = error.message || String(error);
+      result.passed = false;
+      result.message = `Script error: ${errorMessage}`;
+      console.error(`Screenshot: Test "${test.name}" ERROR (${viewportName}):`, errorMessage);
+      // Continue with other tests even if one fails
+    }
+    
+    results.push(result);
+  }
+  
+  // Log summary
+  const passed = results.filter(r => r.passed).length;
+  const failed = results.length - passed;
+  console.log(`Screenshot: Tests completed - ${passed} passed, ${failed} failed (${viewportName})`);
   
   return results;
 }
@@ -300,6 +405,12 @@ async function captureScreenshotForViewport(browser, page, viewport) {
       instructionResults = await executeInstructions(browserPage, page.instructions, viewport.name);
     }
 
+    // Execute AI-generated tests (if any)
+    let testResults = [];
+    if (page.tests && page.tests.length > 0) {
+      testResults = await executeTests(browserPage, page.tests, viewport.name);
+    }
+
     // Scroll through entire page to trigger lazy loading
     console.log(`Screenshot: Scrolling to load lazy content... (${viewport.name})`);
     await autoScroll(browserPage);
@@ -365,7 +476,8 @@ async function captureScreenshotForViewport(browser, page, viewport) {
         height: metadata.height,
         errors: [...jsErrors, ...networkErrors]
       },
-      instructions: instructionResults
+      instructions: instructionResults,
+      tests: testResults
     };
 
   } finally {
@@ -733,4 +845,4 @@ async function autoScroll(page) {
 }
 
 // Export functions
-module.exports = { captureScreenshots, captureScreenshotsWithProgress, captureScreenshotForViewport, executeInstructions, getViewportName, DEFAULT_VIEWPORTS };
+module.exports = { captureScreenshots, captureScreenshotsWithProgress, captureScreenshotForViewport, executeInstructions, executeTests, getViewportName, DEFAULT_VIEWPORTS };

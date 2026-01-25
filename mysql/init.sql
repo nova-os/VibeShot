@@ -135,3 +135,35 @@ CREATE TABLE IF NOT EXISTS screenshot_errors (
     INDEX idx_screenshot_id (screenshot_id),
     INDEX idx_error_type (error_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tests table (AI-generated page test scripts with assertions)
+CREATE TABLE IF NOT EXISTS tests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    page_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    prompt TEXT NOT NULL,
+    script TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    execution_order INT DEFAULT 0,
+    viewports JSON DEFAULT NULL,  -- NULL = all viewports, or array like ["desktop", "mobile"]
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE,
+    INDEX idx_page_id (page_id),
+    INDEX idx_execution_order (execution_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Test results table (records test execution per screenshot)
+CREATE TABLE IF NOT EXISTS test_results (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    test_id INT NOT NULL,
+    screenshot_id INT NOT NULL,
+    passed BOOLEAN NOT NULL,
+    message TEXT,
+    execution_time_ms INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE,
+    FOREIGN KEY (screenshot_id) REFERENCES screenshots(id) ON DELETE CASCADE,
+    INDEX idx_test_id (test_id),
+    INDEX idx_screenshot_id (screenshot_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

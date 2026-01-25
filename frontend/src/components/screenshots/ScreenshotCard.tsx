@@ -97,6 +97,23 @@ export function ScreenshotCard({
           </div>
         )}
 
+        {/* Test Results Indicator */}
+        {!compareMode && (Number(screenshot.tests_passed || 0) > 0 || Number(screenshot.tests_failed || 0) > 0) && (
+          <div className="absolute bottom-2 left-2 flex gap-1">
+            {Number(screenshot.tests_failed || 0) > 0 ? (
+              <Badge variant="destructive" className="px-1.5 py-0.5 text-xs gap-1">
+                <span className="material-symbols-outlined text-xs">cancel</span>
+                {screenshot.tests_passed}/{Number(screenshot.tests_passed || 0) + Number(screenshot.tests_failed || 0)}
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="px-1.5 py-0.5 text-xs gap-1 bg-green-500/90 text-white border-0">
+                <span className="material-symbols-outlined text-xs">check_circle</span>
+                {screenshot.tests_passed}/{screenshot.tests_passed}
+              </Badge>
+            )}
+          </div>
+        )}
+
         {/* Error Indicators */}
         {!compareMode && (Number(screenshot.js_error_count || 0) > 0 || Number(screenshot.network_error_count || 0) > 0) && (
           <div className="absolute bottom-2 right-2 flex gap-1">

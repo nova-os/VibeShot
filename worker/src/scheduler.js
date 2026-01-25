@@ -186,7 +186,7 @@ class Scheduler {
       return true;
     });
     
-    // Fetch instructions for each page and parse viewports
+    // Fetch instructions and tests for each page and parse viewports
     for (const page of filteredPages) {
       const [instructions] = await db.query(`
         SELECT id, name, script, is_active
@@ -195,7 +195,15 @@ class Scheduler {
         ORDER BY execution_order ASC
       `, [page.id]);
       
+      const [tests] = await db.query(`
+        SELECT id, name, script, is_active
+        FROM tests
+        WHERE page_id = ? AND is_active = TRUE AND script IS NOT NULL
+        ORDER BY execution_order ASC
+      `, [page.id]);
+      
       page.instructions = instructions;
+      page.tests = tests;
       
       // Parse viewports JSON if it's a string
       if (typeof page.effective_viewports === 'string') {
@@ -259,15 +267,17 @@ class Scheduler {
         };
         
         // Capture screenshots for all viewports with progress tracking
-        const { screenshots, instructionResults } = await captureScreenshotsWithProgress(
+        const { screenshots, instructionResults, testResults } = await captureScreenshotsWithProgress(
           browser, 
           page, 
           onProgress
         );
         
-        // Save all screenshots to database (including errors)
+        // Save all screenshots to database (including errors) and collect screenshot IDs
+        const screenshotIds = [];
         for (const result of screenshots) {
           const screenshotId = await this.saveScreenshot(page.id, result);
+          screenshotIds.push(screenshotId);
           
           // Save any captured errors
           if (result.errors && result.errors.length > 0) {
@@ -278,6 +288,11 @@ class Scheduler {
         // Save instruction execution results (errors and successes)
         if (instructionResults && instructionResults.length > 0) {
           await this.saveInstructionResults(instructionResults);
+        }
+        
+        // Save test results (link to first screenshot of the capture batch)
+        if (testResults && testResults.length > 0 && screenshotIds.length > 0) {
+          await this.saveTestResults(testResults, screenshotIds[0]);
         }
         
         // Update last_screenshot_at
@@ -413,6 +428,31 @@ class Scheduler {
         console.error(`Scheduler: Failed to save instruction result for ${result.instructionId}:`, dbError.message);
       }
     }
+  }
+
+  async saveTestResults(results, screenshotId) {
+    let passed = 0;
+    let failed = 0;
+    
+    for (const result of results) {
+      try {
+        await db.query(
+          `INSERT INTO test_results (test_id, screenshot_id, passed, message, execution_time_ms)
+           VALUES (?, ?, ?, ?, ?)`,
+          [result.testId, screenshotId, result.passed, result.message, result.executionTimeMs]
+        );
+        
+        if (result.passed) {
+          passed++;
+        } else {
+          failed++;
+        }
+      } catch (dbError) {
+        console.error(`Scheduler: Failed to save test result for test ${result.testId}:`, dbError.message);
+      }
+    }
+    
+    console.log(`Scheduler: Saved ${results.length} test result(s) for screenshot ${screenshotId} (${passed} passed, ${failed} failed)`);
   }
 }
 

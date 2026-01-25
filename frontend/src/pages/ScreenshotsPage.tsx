@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, Page, Screenshot, Instruction, CaptureJob } from '@/lib/api'
+import { api, Page, Screenshot, Instruction, Test, CaptureJob } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
@@ -12,6 +12,7 @@ import { ComparisonViewer } from '@/components/screenshots/ComparisonViewer'
 import { EditPageDialog } from '@/components/pages/EditPageDialog'
 import { DeletePageDialog } from '@/components/pages/DeletePageDialog'
 import { InstructionsList } from '@/components/instructions/InstructionsList'
+import { TestsList } from '@/components/tests/TestsList'
 import { DeleteScreenshotsDialog } from '@/components/screenshots/DeleteScreenshotsDialog'
 import { usePolling } from '@/hooks/usePolling'
 import { toast } from 'sonner'
@@ -30,6 +31,7 @@ export function ScreenshotsPage() {
   const [page, setPage] = useState<Page | null>(null)
   const [screenshots, setScreenshots] = useState<Screenshot[]>([])
   const [instructions, setInstructions] = useState<Instruction[]>([])
+  const [tests, setTests] = useState<Test[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [viewportFilter, setViewportFilter] = useState<ViewportFilter>('all')
   const initialLoadDone = useRef(false)
@@ -57,12 +59,14 @@ export function ScreenshotsPage() {
     if (!pageId) return
 
     try {
-      const [pageData, instructionsData] = await Promise.all([
+      const [pageData, instructionsData, testsData] = await Promise.all([
         api.getPage(parseInt(pageId, 10)),
         api.getInstructions(parseInt(pageId, 10)),
+        api.getTests(parseInt(pageId, 10)),
       ])
       setPage(pageData)
       setInstructions(instructionsData)
+      setTests(testsData)
     } catch (error) {
       // Only show error on initial load, not during polling
       if (!initialLoadDone.current) {
@@ -378,6 +382,13 @@ export function ScreenshotsPage() {
       <InstructionsList
         pageId={page.id}
         instructions={instructions}
+        onUpdate={loadData}
+      />
+
+      {/* Tests Section */}
+      <TestsList
+        pageId={page.id}
+        tests={tests}
         onUpdate={loadData}
       />
 

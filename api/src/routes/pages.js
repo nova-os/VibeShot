@@ -308,11 +308,13 @@ router.get('/:id/screenshots', async (req, res) => {
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    // Build query with optional viewport filter (includes error counts)
+    // Build query with optional viewport filter (includes error counts and test results)
     let screenshotsQuery = `
       SELECT s.*, 
              COALESCE(error_counts.js_error_count, 0) as js_error_count,
-             COALESCE(error_counts.network_error_count, 0) as network_error_count
+             COALESCE(error_counts.network_error_count, 0) as network_error_count,
+             COALESCE(test_counts.tests_passed, 0) as tests_passed,
+             COALESCE(test_counts.tests_failed, 0) as tests_failed
       FROM screenshots s
       LEFT JOIN (
         SELECT screenshot_id,
@@ -321,6 +323,13 @@ router.get('/:id/screenshots', async (req, res) => {
         FROM screenshot_errors
         GROUP BY screenshot_id
       ) error_counts ON s.id = error_counts.screenshot_id
+      LEFT JOIN (
+        SELECT screenshot_id,
+               SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as tests_passed,
+               SUM(CASE WHEN passed = 0 THEN 1 ELSE 0 END) as tests_failed
+        FROM test_results
+        GROUP BY screenshot_id
+      ) test_counts ON s.id = test_counts.screenshot_id
       WHERE s.page_id = ?`;
     let countQuery = `SELECT COUNT(*) as total FROM screenshots WHERE page_id = ?`;
     const queryParams = [req.params.id];
@@ -681,6 +690,300 @@ router.post('/:id/instructions/:instructionId/regenerate', async (req, res) => {
   } catch (error) {
     console.error('Regenerate instruction error:', error);
     res.status(500).json({ error: 'Failed to regenerate instruction' });
+  }
+});
+
+// ============================================
+// TESTS ROUTES
+// ============================================
+
+// Get tests for a page
+router.get('/:id/tests', async (req, res) => {
+  try {
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    const [tests] = await db.query(
+      `SELECT * FROM tests WHERE page_id = ? ORDER BY execution_order ASC`,
+      [req.params.id]
+    );
+
+    // Parse viewports JSON for each test
+    for (const test of tests) {
+      if (test.viewports && typeof test.viewports === 'string') {
+        test.viewports = JSON.parse(test.viewports);
+      }
+    }
+
+    res.json(tests);
+  } catch (error) {
+    console.error('Get tests error:', error);
+    res.status(500).json({ error: 'Failed to get tests' });
+  }
+});
+
+// Create test for a page
+router.post('/:id/tests', async (req, res) => {
+  try {
+    const { name, prompt, viewport, viewports } = req.body;
+
+    if (!name || !prompt) {
+      return res.status(400).json({ error: 'Name and prompt are required' });
+    }
+
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Get the next execution order
+    const [maxOrder] = await db.query(
+      'SELECT MAX(execution_order) as max_order FROM tests WHERE page_id = ?',
+      [req.params.id]
+    );
+    const nextOrder = (maxOrder[0].max_order || 0) + 1;
+
+    // Call worker to generate test script
+    console.log(`Generating test for page ${page.url} with prompt: "${prompt}"`);
+    
+    let script = null;
+    let generationError = null;
+
+    try {
+      const result = await callWorkerApi('/generate-test', {
+        pageUrl: page.url,
+        prompt,
+        viewport: viewport || 'desktop'
+      });
+
+      if (result.success) {
+        script = result.script;
+      } else {
+        generationError = result.error;
+        console.error('Test generation failed:', result.error);
+      }
+    } catch (err) {
+      generationError = err.message;
+      console.error('Worker API call failed:', err.message);
+    }
+
+    // Insert test (even if script generation failed - user can regenerate)
+    // viewports: null = all viewports, or array like ["desktop", "mobile"]
+    const viewportsJson = viewports && viewports.length > 0 ? JSON.stringify(viewports) : null;
+    const [insertResult] = await db.query(
+      `INSERT INTO tests (page_id, name, prompt, script, execution_order, viewports)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.params.id, name, prompt, script, nextOrder, viewportsJson]
+    );
+
+    const [tests] = await db.query(
+      'SELECT * FROM tests WHERE id = ?',
+      [insertResult.insertId]
+    );
+
+    const response = tests[0];
+    // Parse viewports JSON
+    if (response.viewports && typeof response.viewports === 'string') {
+      response.viewports = JSON.parse(response.viewports);
+    }
+    if (generationError) {
+      response.generationError = generationError;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create test error:', error);
+    res.status(500).json({ error: 'Failed to create test' });
+  }
+});
+
+// Reorder tests (MUST be before /:testId routes to avoid matching "reorder" as an ID)
+router.put('/:id/tests/reorder', async (req, res) => {
+  try {
+    const { testIds } = req.body;
+
+    if (!Array.isArray(testIds)) {
+      return res.status(400).json({ error: 'testIds must be an array' });
+    }
+
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Update execution_order for each test
+    for (let i = 0; i < testIds.length; i++) {
+      await db.query(
+        'UPDATE tests SET execution_order = ? WHERE id = ? AND page_id = ?',
+        [i, testIds[i], req.params.id]
+      );
+    }
+
+    const [tests] = await db.query(
+      'SELECT * FROM tests WHERE page_id = ? ORDER BY execution_order ASC',
+      [req.params.id]
+    );
+
+    res.json(tests);
+  } catch (error) {
+    console.error('Reorder tests error:', error);
+    res.status(500).json({ error: 'Failed to reorder tests' });
+  }
+});
+
+// Update test
+router.put('/:id/tests/:testId', async (req, res) => {
+  try {
+    const { name, prompt, is_active, script, viewports } = req.body;
+
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Verify test belongs to this page
+    const [existing] = await db.query(
+      'SELECT * FROM tests WHERE id = ? AND page_id = ?',
+      [req.params.testId, req.params.id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+
+    // Build dynamic update query to handle viewports (which can be null for "all viewports")
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    if (prompt !== undefined) {
+      updates.push('prompt = ?');
+      values.push(prompt);
+    }
+    if (is_active !== undefined) {
+      updates.push('is_active = ?');
+      values.push(is_active);
+    }
+    if (script !== undefined) {
+      updates.push('script = ?');
+      values.push(script);
+    }
+    // viewports: null or empty array = all viewports, array = specific viewports
+    if (viewports !== undefined) {
+      updates.push('viewports = ?');
+      values.push(viewports && viewports.length > 0 ? JSON.stringify(viewports) : null);
+    }
+
+    if (updates.length > 0) {
+      values.push(req.params.testId);
+      await db.query(
+        `UPDATE tests SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+    }
+
+    const [tests] = await db.query(
+      'SELECT * FROM tests WHERE id = ?',
+      [req.params.testId]
+    );
+
+    const test = tests[0];
+    // Parse viewports JSON
+    if (test.viewports && typeof test.viewports === 'string') {
+      test.viewports = JSON.parse(test.viewports);
+    }
+
+    res.json(test);
+  } catch (error) {
+    console.error('Update test error:', error);
+    res.status(500).json({ error: 'Failed to update test' });
+  }
+});
+
+// Delete test
+router.delete('/:id/tests/:testId', async (req, res) => {
+  try {
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Verify test belongs to this page
+    const [existing] = await db.query(
+      'SELECT * FROM tests WHERE id = ? AND page_id = ?',
+      [req.params.testId, req.params.id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+
+    await db.query('DELETE FROM tests WHERE id = ?', [req.params.testId]);
+    res.json({ message: 'Test deleted successfully' });
+  } catch (error) {
+    console.error('Delete test error:', error);
+    res.status(500).json({ error: 'Failed to delete test' });
+  }
+});
+
+// Regenerate script for test
+router.post('/:id/tests/:testId/regenerate', async (req, res) => {
+  try {
+    const { viewport } = req.body;
+
+    const page = await verifyPageOwnership(req.params.id, req.user.id);
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+
+    // Get the test
+    const [tests] = await db.query(
+      'SELECT * FROM tests WHERE id = ? AND page_id = ?',
+      [req.params.testId, req.params.id]
+    );
+
+    if (tests.length === 0) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+
+    const test = tests[0];
+
+    // Call worker to regenerate test script
+    console.log(`Regenerating test script for test ${test.id}`);
+    
+    try {
+      const result = await callWorkerApi('/generate-test', {
+        pageUrl: page.url,
+        prompt: test.prompt,
+        viewport: viewport || 'desktop'
+      });
+
+      if (result.success) {
+        await db.query(
+          'UPDATE tests SET script = ? WHERE id = ?',
+          [result.script, req.params.testId]
+        );
+
+        const [updated] = await db.query(
+          'SELECT * FROM tests WHERE id = ?',
+          [req.params.testId]
+        );
+
+        res.json(updated[0]);
+      } else {
+        res.status(500).json({ error: 'Test generation failed: ' + result.error });
+      }
+    } catch (err) {
+      res.status(500).json({ error: 'Worker API call failed: ' + err.message });
+    }
+  } catch (error) {
+    console.error('Regenerate test error:', error);
+    res.status(500).json({ error: 'Failed to regenerate test' });
   }
 });
 
