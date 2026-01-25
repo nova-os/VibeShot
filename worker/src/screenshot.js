@@ -589,18 +589,10 @@ async function captureScreenshotForViewport(browser, page, viewport) {
 
     // Scroll back to top
     await browserPage.evaluate(() => window.scrollTo(0, 0));
-    await sleep(500);
 
-    console.log(`Screenshot: Setting viewport to ${viewport.width}x${viewport.height} (${viewport.name})`);
-    // Resize viewport to full page size for capture
-    await browserPage.setViewport({
-      width: viewport.width,
-      height: viewport.height,
-      deviceScaleFactor: 1
-    });
 
-    // Wait for any reflow after viewport change
-    await sleep(500);
+    // Wait for any reflow after scroll to top
+    await sleep(2000);
 
     // Take full page screenshot
     console.log(`Screenshot: Capturing full page screenshot (${viewport.name})`);
