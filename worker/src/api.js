@@ -4,6 +4,7 @@ const TestGenerator = require('./test-generator');
 const ActionScriptGenerator = require('./action-script-generator');
 const ActionTestGenerator = require('./action-test-generator');
 const PageDiscovery = require('./page-discovery');
+const { preparePage } = require('./browser-helpers');
 
 /**
  * Worker HTTP API - Provides endpoints for script generation, test generation, and page discovery
@@ -245,17 +246,13 @@ class WorkerApi {
         browser = await this.browserPool.acquire();
         page = await browser.newPage();
 
-        const viewportSizes = {
-          mobile: { width: 375, height: 812 },
-          tablet: { width: 768, height: 1024 },
-          desktop: { width: 1920, height: 1080 }
-        };
-        
-        await page.setViewport(viewportSizes[viewport] || viewportSizes.desktop);
-        await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-        
-        // Wait for page to stabilize
-        await new Promise(r => setTimeout(r, 1000));
+        // Prepare page with viewport, navigation, and cookie consent handling
+        // Uses same setup as screenshot capture for consistent page state
+        await preparePage(page, pageUrl, { 
+          viewport: viewport || 'desktop', 
+          timeout: 60000,
+          logPrefix: 'WorkerAPI[test-script]'
+        });
 
         // Execute the script
         await page.evaluate(script);

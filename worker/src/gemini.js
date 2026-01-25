@@ -244,65 +244,36 @@ const actionGeminiTools = [{
   }))
 }];
 
-// System prompt for simple script generation (instructions/actions - eval mode)
-const SYSTEM_PROMPT = `You are an expert at web automation and DOM manipulation. Your task is to generate JavaScript code that performs a specific action on a webpage.
-
-You have tools to explore the page:
+// Common prompt building blocks
+const PROMPT_TOOLS = `You have tools to explore the page:
 - getAccessibilityTree: See the full page structure
 - querySelector: Test if a CSS selector works
 - getElementDetails: Get info about specific elements
-- getClickableElements: Find all interactive elements
+- getClickableElements: Find all interactive elements`;
 
-Process:
+const PROMPT_PROCESS_ACTION = `Process:
 1. First, understand what the user wants to do
 2. Use tools to explore the page and find the right elements
-3. Test selectors to make sure they work
-4. Generate the final script using generateScript
+3. Test selectors to make sure they work`;
 
-Guidelines for the generated script:
-- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
-- Handle the case where elements might not exist
-- Use click(), focus(), or other standard DOM methods
-- Keep the script simple and focused on the task
-- Do NOT use setTimeout or async operations - the script should be synchronous
+const PROMPT_PROCESS_TEST = `Process:
+1. First, understand what the user wants to test/verify
+2. Use tools to explore the page and find the relevant elements
+3. Test selectors to make sure they work`;
+
+const PROMPT_SELECTOR_GUIDELINE = `- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)`;
+
+const PROMPT_EVAL_RESTRICTIONS = `- Do NOT use setTimeout or async operations - the script should be synchronous
 - Do NOT make fetch requests or load external resources
-- Do NOT use alert, confirm, or prompt
+- Do NOT use alert, confirm, or prompt`;
 
-Example script format:
-const element = document.querySelector('#menu-toggle');
-if (element) {
-  element.click();
-}`;
-
-// System prompt for action DSL generation (complex multi-step instructions)
-const ACTION_SYSTEM_PROMPT = `You are an expert at web automation using a predefined actions DSL for browser automation. Your task is to generate a sequence of actions that performs a workflow on a webpage.
-
-You have tools to explore the page:
-- getAccessibilityTree: See the full page structure
-- querySelector: Test if a CSS selector works
-- getElementDetails: Get info about specific elements
-- getClickableElements: Find all interactive elements
-
-Available action types:
-${generateActionDocs()}
-
-Process:
-1. First, understand what the user wants to do
-2. Use tools to explore the page and find the right elements
-3. Test selectors to make sure they work
-4. Generate the action sequence using generateActionSequence
-
-Guidelines for action sequences:
-- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
-- Add waitForSelector before interacting with elements that may not be immediately present
+const PROMPT_ACTION_GUIDELINES = `- Add waitForSelector before interacting with elements that may not be immediately present
 - Use waitForNavigation after clicks that trigger page loads
 - Add descriptive labels to steps for debugging
 - Use appropriate timeouts (default is usually fine)
-- For forms: use type for text inputs, select for dropdowns, click for checkboxes/buttons
-- Even for simple single actions, use the action sequence format
+- For forms: use type for text inputs, select for dropdowns, click for checkboxes/buttons`;
 
-Example action sequence for a login flow:
-{
+const PROMPT_LOGIN_EXAMPLE = `{
   "steps": [
     { "action": "waitForSelector", "selector": "#username", "label": "Wait for login form" },
     { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
@@ -311,9 +282,78 @@ Example action sequence for a login flow:
     { "action": "waitForNavigation", "waitUntil": "networkidle2", "label": "Wait for redirect" },
     { "action": "waitForSelector", "selector": ".dashboard", "label": "Verify dashboard loaded" }
   ]
-}
+}`;
 
-Example action sequence for a simple click:
+const PROMPT_ASSERTION_ACTIONS = `Assertion actions for tests:
+- assertSelector: Check if element exists, is visible, or has specific count
+- assertText: Check element text content (exact or contains)
+- assertUrl: Check current URL matches pattern
+- assertTitle: Check page title matches pattern
+- assert: Run custom JavaScript assertion that returns { passed: boolean, message: string }`;
+
+const ROLE_ACTIONS_EVAL_MODE = `
+You are an expert at web automation and DOM manipulation. 
+Your task is to generate JavaScript code that performs a specific action on a webpage.
+`.replace(/\n/g, ' ');
+
+const ROLE_ACTIONS_ACTION_MODE = `
+You are an Software Engineer specialized in writing browser automation scripts for web applications. 
+Your task is to generate a browser automation script using a predefined actions DSL for browser automation.
+`.replace(/\n/g, ' ');
+
+const ROLE_TESTS_EVAL_MODE = `
+You are an Software Engineer specialized in writing automated tests for web applications in javascript. 
+For defining the test cases, you are using javascript code. 
+Your task is to generate JavaScript test code that verifies conditions on a webpage.
+`.replace(/\n/g, ' ');
+
+const ROLE_TESTS_ACTION_MODE = `
+You are an Software Engineer specialized in writing automated tests for web applications. 
+For defining the test cases, you are using a predefined actions DSL for browser automation. 
+Your task is to generate a sequence of actions that performs a test case by defining a workflow on a webpage.
+`.replace(/\n/g, ' ');
+
+// System prompt for simple script generation (instructions/actions - eval mode)
+const SYSTEM_PROMPT_ACTIONS_EVAL_MODE = `${ROLE_ACTIONS_EVAL_MODE}
+
+${PROMPT_TOOLS}
+
+${PROMPT_PROCESS_ACTION}
+4. Generate the final script using generateScript
+
+Guidelines for the generated script:
+${PROMPT_SELECTOR_GUIDELINE}
+- Handle the case where elements might not exist
+- Use click(), focus(), or other standard DOM methods
+- Keep the script simple and focused on the task
+${PROMPT_EVAL_RESTRICTIONS}
+
+Example script format:
+const element = document.querySelector('#menu-toggle');
+if (element) {
+  element.click();
+}`;
+
+// System prompt for action DSL generation (complex multi-step instructions)
+const SYSTEM_PROMT_ACTIONS_ACTION_MODE = `${ROLE_ACTIONS_ACTION_MODE}
+
+${PROMPT_TOOLS}
+
+Available action types:
+${generateActionDocs()}
+
+${PROMPT_PROCESS_ACTION}
+4. Generate the action sequence using generateActionSequence
+
+Guidelines for action sequences:
+${PROMPT_SELECTOR_GUIDELINE}
+${PROMPT_ACTION_GUIDELINES}
+- Even for simple single actions, use the action sequence format
+
+Example action sequence for a login flow:
+${PROMPT_LOGIN_EXAMPLE}
+
+Example action sequence for a simple click test case:
 {
   "steps": [
     { "action": "waitForSelector", "selector": "#menu-toggle", "label": "Wait for menu button" },
@@ -322,28 +362,16 @@ Example action sequence for a simple click:
 }`;
 
 // System prompt for action DSL test generation
-const ACTION_TEST_SYSTEM_PROMPT = `You are an expert at web testing using Puppeteer. Your task is to generate a sequence of actions that tests specific functionality on a webpage.
+const SYSTEM_PROMPT_TESTS_ACTION_MODE = `${ROLE_TESTS_ACTION_MODE}
 
-You have tools to explore the page:
-- getAccessibilityTree: See the full page structure
-- querySelector: Test if a CSS selector works
-- getElementDetails: Get info about specific elements
-- getClickableElements: Find all interactive elements
+${PROMPT_TOOLS}
 
 Available action types:
 ${generateActionDocs()}
 
-Assertion actions for tests:
-- assertSelector: Check if element exists, is visible, or has specific count
-- assertText: Check element text content (exact or contains)
-- assertUrl: Check current URL matches pattern
-- assertTitle: Check page title matches pattern
-- assert: Run custom JavaScript assertion that returns { passed: boolean, message: string }
+${PROMPT_ASSERTION_ACTIONS}
 
-Process:
-1. First, understand what the user wants to test
-2. Use tools to explore the page and find the right elements
-3. Test selectors to make sure they work
+${PROMPT_PROCESS_TEST}
 4. Generate the test action sequence using generateActionSequence
 
 Guidelines for test action sequences:
@@ -376,32 +404,24 @@ Example test action sequence for a simple element check:
 }`;
 
 // System prompt for test generation (assertions)
-const TEST_SYSTEM_PROMPT = `You are an expert at web testing and DOM assertions. Your task is to generate JavaScript test code that verifies conditions on a webpage.
+const SYTEM_PROMT_TESTS_EVAL_MODE = `
+${ROLE_TESTS_EVAL_MODE}
 
-You have tools to explore the page:
-- getAccessibilityTree: See the full page structure
-- querySelector: Test if a CSS selector works
-- getElementDetails: Get info about specific elements
-- getClickableElements: Find all interactive elements
+${PROMPT_TOOLS}
 
-Process:
-1. First, understand what the user wants to test/verify
-2. Use tools to explore the page and find the relevant elements
-3. Test selectors to make sure they work
+${PROMPT_PROCESS_TEST}
 4. Generate the final test script using generateScript
 
 CRITICAL: The generated script MUST return an object with this exact structure:
 { passed: boolean, message: string }
 
 Guidelines for the generated test script:
-- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
+${PROMPT_SELECTOR_GUIDELINE}
 - ALWAYS return { passed: true/false, message: "..." }
 - Provide helpful, descriptive failure messages that explain what was expected vs what was found
 - Check for element existence before accessing properties
 - Keep the test focused on a single assertion or related group of assertions
-- Do NOT use setTimeout or async operations - the script should be synchronous
-- Do NOT make fetch requests or load external resources
-- Do NOT use alert, confirm, or prompt
+${PROMPT_EVAL_RESTRICTIONS}
 - Wrap the entire script in an IIFE that returns the result
 
 Example test scripts:
@@ -453,7 +473,8 @@ Example test scripts:
     return { passed: true, message: 'Email field has value: "' + input.value + '"' };
   }
   return { passed: false, message: 'Email field is empty' };
-})();`;
+})();
+`;
 
 /**
  * Execute a tool call using the Puppeteer page
@@ -697,16 +718,29 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
     await logAiMessage(sessionId, 'system', systemPrompt);
 
     // Log the initial user prompt
-    const initialMessage = `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`;
+    const initialMessage = `${prompt}`;
     await logAiMessage(sessionId, 'user', initialMessage);
 
     // Initial message with the task
     let response = await chat.sendMessage(initialMessage);
 
     // Tool use loop (max 10 iterations to prevent infinite loops)
-    for (let i = 0; i < 10; i++) {
-      const candidate = response.response.candidates[0];
+    for (let i = 0; i < 20; i++) {
+      const candidate = response.response.candidates?.[0];
+      if (!candidate) {
+        const errorMsg = 'No response candidate from Gemini API';
+        await updateSessionStatus(sessionId, 'failed', errorMsg);
+        return { error: errorMsg };
+      }
+      
       const content = candidate.content;
+      if (!content || !content.parts || !Array.isArray(content.parts)) {
+        // This can happen if content was blocked or the response is malformed
+        const finishReason = candidate.finishReason;
+        const errorMsg = `Invalid response structure from Gemini API (finishReason: ${finishReason})`;
+        await updateSessionStatus(sessionId, 'failed', errorMsg);
+        return { error: errorMsg };
+      }
       
       // Check if there are function calls
       const functionCalls = [];
@@ -786,7 +820,7 @@ async function generateScript(page, prompt, pageUrl, sessionId = null) {
     page, 
     prompt, 
     pageUrl, 
-    SYSTEM_PROMPT, 
+    SYSTEM_PROMPT_ACTIONS_EVAL_MODE, 
     'User instruction',
     simpleGeminiTools,  // Simple mode - only generateScript tool available
     sessionId
@@ -806,7 +840,7 @@ async function generateTestScript(page, prompt, pageUrl, sessionId = null) {
     page, 
     prompt, 
     pageUrl, 
-    TEST_SYSTEM_PROMPT, 
+    SYTEM_PROMT_TESTS_EVAL_MODE, 
     'Test to verify',
     simpleGeminiTools,  // Simple mode - only generateScript tool available
     sessionId
@@ -826,7 +860,7 @@ async function generateActionScript(page, prompt, pageUrl, sessionId = null) {
     page, 
     prompt, 
     pageUrl, 
-    ACTION_SYSTEM_PROMPT, 
+    SYSTEM_PROMT_ACTIONS_ACTION_MODE, 
     'User instruction',
     actionGeminiTools,  // Action mode - only generateActionSequence available
     sessionId
@@ -846,7 +880,7 @@ async function generateActionTestScript(page, prompt, pageUrl, sessionId = null)
     page, 
     prompt, 
     pageUrl, 
-    ACTION_TEST_SYSTEM_PROMPT, 
+    SYSTEM_PROMPT_TESTS_ACTION_MODE, 
     'Test to verify',
     actionGeminiTools,  // Action mode - only generateActionSequence available
     sessionId

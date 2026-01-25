@@ -1,5 +1,6 @@
 const { generateActionScript } = require('./gemini');
 const { validateActionSequence, parseActionSequence, executeActionSequence } = require('./action-executor');
+const { preparePage } = require('./browser-helpers');
 
 /**
  * Action Script Generator - Orchestrates the generation of page interaction scripts
@@ -36,28 +37,13 @@ class ActionScriptGenerator {
       // Create new page
       page = await browser.newPage();
 
-      // Set viewport based on option
-      const viewportSizes = {
-        mobile: { width: 375, height: 812 },
-        tablet: { width: 768, height: 1024 },
-        desktop: { width: 1920, height: 1080 }
-      };
-      
-      await page.setViewport(viewportSizes[viewport] || viewportSizes.desktop);
-
-      // Set timeouts
-      page.setDefaultNavigationTimeout(30000);
-      page.setDefaultTimeout(30000);
-
-      // Navigate to the page
-      console.log(`ActionScriptGenerator: Navigating to ${pageUrl}`);
-      await page.goto(pageUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 30000
+      // Prepare page with viewport, navigation, and cookie consent handling
+      // Uses same setup as screenshot capture for consistent page state
+      await preparePage(page, pageUrl, { 
+        viewport, 
+        timeout: 60000,
+        logPrefix: 'ActionScriptGenerator'
       });
-
-      // Wait for initial content
-      await this.sleep(1000);
 
       // Generate script using Gemini (may return eval or actions mode)
       console.log('ActionScriptGenerator: Calling Gemini for script generation');
@@ -146,10 +132,6 @@ class ActionScriptGenerator {
     } catch (error) {
       return { success: false, error: error.message };
     }
-  }
-
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
