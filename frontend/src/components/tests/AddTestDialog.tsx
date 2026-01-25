@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Icon } from '@/components/ui/icon'
+import { AiChatPanel } from '@/components/ai/AiChatPanel'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 
@@ -49,6 +50,8 @@ export function AddTestDialog({
   const [runOnViewports, setRunOnViewports] = useState<string[]>([]) // empty = all
   const [useActions, setUseActions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [sessionId, setSessionId] = useState<number | null>(null)
+  const [isComplete, setIsComplete] = useState(false)
 
   const toggleViewport = (vp: string) => {
     setRunOnViewports(prev => 
@@ -71,29 +74,82 @@ export function AddTestDialog({
         useActions
       })
       
-      if (test.generationError) {
-        toast.error(`Test created but script generation failed: ${test.generationError}`)
-      } else if (test.script) {
-        const modeLabel = test.script_type === 'actions' ? 'action sequence' : 'script'
-        toast.success(`Test created with AI-generated ${modeLabel}`)
+      if (test.sessionId) {
+        // Show the chat panel for live updates
+        setSessionId(test.sessionId)
       } else {
+        // Fallback for when no session is created (shouldn't happen normally)
         toast.success('Test created')
+        handleClose()
+        onSuccess()
       }
-      
-      setName('')
-      setPrompt('')
-      setViewport('desktop')
-      setRunOnViewports([])
-      setUseActions(false)
-      onOpenChange(false)
-      onSuccess()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create test')
-    } finally {
       setIsLoading(false)
     }
   }
 
+  const handleGenerationComplete = () => {
+    setIsComplete(true)
+  }
+
+  const handleClose = () => {
+    // Reset state
+    setName('')
+    setPrompt('')
+    setViewport('desktop')
+    setRunOnViewports([])
+    setUseActions(false)
+    setIsLoading(false)
+    setSessionId(null)
+    setIsComplete(false)
+    onOpenChange(false)
+  }
+
+  const handleFinish = () => {
+    toast.success('Test created with AI-generated script')
+    handleClose()
+    onSuccess()
+  }
+
+  // Show chat panel when generating
+  if (sessionId) {
+    return (
+      <Dialog open={open} onOpenChange={(open) => !open && handleClose()}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Generating Test Script</DialogTitle>
+            <DialogDescription>
+              AI is analyzing the page and generating the test script for "{name}"
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 min-h-[300px] overflow-hidden flex flex-col">
+            <AiChatPanel 
+              sessionId={sessionId} 
+              onComplete={handleGenerationComplete}
+              className="flex-1 min-h-0"
+            />
+          </div>
+          
+          <DialogFooter>
+            {isComplete ? (
+              <Button onClick={handleFinish}>
+                <Icon name="check" size="sm" />
+                Done
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={handleClose}>
+                Cancel
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // Show form
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -195,7 +251,7 @@ export function AddTestDialog({
               {isLoading ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
-                  Generating test...
+                  Starting...
                 </>
               ) : (
                 'Create Test'

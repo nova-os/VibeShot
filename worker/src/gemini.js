@@ -1,7 +1,48 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { ACTION_SCHEMAS } = require('./action-executor');
+const db = require('./config/database');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+/**
+ * Log an AI message to the database
+ * @param {number|null} sessionId - AI session ID (null if not tracking)
+ * @param {string} role - Message role: 'system', 'user', 'assistant', 'tool_call', 'tool_result'
+ * @param {string} content - Message content
+ * @param {string|null} toolName - Tool name (for tool_call and tool_result)
+ */
+async function logAiMessage(sessionId, role, content, toolName = null) {
+  if (!sessionId) return;
+  
+  try {
+    await db.query(
+      `INSERT INTO ai_messages (session_id, role, content, tool_name) VALUES (?, ?, ?, ?)`,
+      [sessionId, role, content, toolName]
+    );
+  } catch (error) {
+    console.error('Failed to log AI message:', error.message);
+  }
+}
+
+/**
+ * Update AI session status
+ * @param {number|null} sessionId - AI session ID
+ * @param {string} status - New status: 'pending', 'running', 'completed', 'failed'
+ * @param {string|null} errorMessage - Error message (for failed status)
+ */
+async function updateSessionStatus(sessionId, status, errorMessage = null) {
+  if (!sessionId) return;
+  
+  try {
+    const completedAt = (status === 'completed' || status === 'failed') ? new Date() : null;
+    await db.query(
+      `UPDATE ai_sessions SET status = ?, error_message = ?, completed_at = ? WHERE id = ?`,
+      [status, errorMessage, completedAt, sessionId]
+    );
+  } catch (error) {
+    console.error('Failed to update AI session status:', error.message);
+  }
+}
 
 if (!GEMINI_API_KEY) {
   console.warn('Warning: GEMINI_API_KEY not set. Script generation will not work.');
@@ -183,6 +224,26 @@ const geminiTools = [{
   }))
 }];
 
+// Simple mode tools - excludes generateActionSequence to force eval-only output
+const simpleTools = tools.filter(t => t.name !== 'generateActionSequence');
+const simpleGeminiTools = [{
+  functionDeclarations: simpleTools.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters || { type: 'object', properties: {} }
+  }))
+}];
+
+// Action mode tools - excludes generateScript to force action sequence output
+const actionTools = tools.filter(t => t.name !== 'generateScript');
+const actionGeminiTools = [{
+  functionDeclarations: actionTools.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters || { type: 'object', properties: {} }
+  }))
+}];
+
 // System prompt for simple script generation (instructions/actions - eval mode)
 const SYSTEM_PROMPT = `You are an expert at web automation and DOM manipulation. Your task is to generate JavaScript code that performs a specific action on a webpage.
 
@@ -214,7 +275,7 @@ if (element) {
 }`;
 
 // System prompt for action DSL generation (complex multi-step instructions)
-const ACTION_SYSTEM_PROMPT = `You are an expert at web automation using Puppeteer. Your task is to generate a sequence of actions that performs a complex workflow on a webpage.
+const ACTION_SYSTEM_PROMPT = `You are an expert at web automation using a predefined actions DSL for browser automation. Your task is to generate a sequence of actions that performs a workflow on a webpage.
 
 You have tools to explore the page:
 - getAccessibilityTree: See the full page structure
@@ -222,27 +283,14 @@ You have tools to explore the page:
 - getElementDetails: Get info about specific elements
 - getClickableElements: Find all interactive elements
 
-When to use Action Sequences (generateActionSequence) vs Simple Scripts (generateScript):
-- Use ACTION SEQUENCES when the task involves:
-  - Clicking links that navigate to new pages
-  - Filling out forms and submitting them
-  - Multi-step workflows (login, checkout, etc.)
-  - Waiting for elements to appear/disappear
-  - Any operation that requires waiting for navigation
-- Use SIMPLE SCRIPTS for:
-  - Single DOM manipulations (click a button, toggle a menu)
-  - Operations that don't cause navigation
-  - Reading/modifying page content
-
 Available action types:
 ${generateActionDocs()}
 
 Process:
 1. First, understand what the user wants to do
-2. Determine if this requires navigation or multi-step workflow (use action sequence) or simple DOM manipulation (use simple script)
-3. Use tools to explore the page and find the right elements
-4. Test selectors to make sure they work
-5. Generate either an action sequence (generateActionSequence) or simple script (generateScript)
+2. Use tools to explore the page and find the right elements
+3. Test selectors to make sure they work
+4. Generate the action sequence using generateActionSequence
 
 Guidelines for action sequences:
 - Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
@@ -251,6 +299,7 @@ Guidelines for action sequences:
 - Add descriptive labels to steps for debugging
 - Use appropriate timeouts (default is usually fine)
 - For forms: use type for text inputs, select for dropdowns, click for checkboxes/buttons
+- Even for simple single actions, use the action sequence format
 
 Example action sequence for a login flow:
 {
@@ -262,6 +311,14 @@ Example action sequence for a login flow:
     { "action": "waitForNavigation", "waitUntil": "networkidle2", "label": "Wait for redirect" },
     { "action": "waitForSelector", "selector": ".dashboard", "label": "Verify dashboard loaded" }
   ]
+}
+
+Example action sequence for a simple click:
+{
+  "steps": [
+    { "action": "waitForSelector", "selector": "#menu-toggle", "label": "Wait for menu button" },
+    { "action": "click", "selector": "#menu-toggle", "label": "Click menu toggle" }
+  ]
 }`;
 
 // System prompt for action DSL test generation
@@ -272,17 +329,6 @@ You have tools to explore the page:
 - querySelector: Test if a CSS selector works
 - getElementDetails: Get info about specific elements
 - getClickableElements: Find all interactive elements
-
-When to use Action Sequences (generateActionSequence) vs Simple Scripts (generateScript):
-- Use ACTION SEQUENCES when the test involves:
-  - Navigation between pages
-  - Multi-step user flows (login, form submission, etc.)
-  - Waiting for async operations
-  - Multiple assertions across different states
-- Use SIMPLE SCRIPTS for:
-  - Simple element existence checks
-  - Single-page content verification
-  - Reading page state without navigation
 
 Available action types:
 ${generateActionDocs()}
@@ -296,15 +342,15 @@ Assertion actions for tests:
 
 Process:
 1. First, understand what the user wants to test
-2. Determine if this requires navigation/multi-step flow (use action sequence) or simple assertion (use simple script)
-3. Use tools to explore the page and find the right elements
-4. Test selectors to make sure they work
-5. Generate the test
+2. Use tools to explore the page and find the right elements
+3. Test selectors to make sure they work
+4. Generate the test action sequence using generateActionSequence
 
 Guidelines for test action sequences:
-- Start with setup steps (navigate, click, fill forms)
+- Always use the action sequence format, even for simple single assertions
+- Start with setup steps if needed (navigate, click, fill forms)
 - End with assertion steps to verify the expected state
-- Add descriptive labels for debugging
+- Add descriptive labels to all steps for debugging
 - Include meaningful error messages in assertions
 - Use multiple assertions to verify different aspects
 
@@ -318,6 +364,14 @@ Example test action sequence for verifying login:
     { "action": "assertUrl", "pattern": "/dashboard", "message": "Should redirect to dashboard" },
     { "action": "assertSelector", "selector": ".welcome-message", "visible": true, "message": "Welcome message should be visible" },
     { "action": "assertText", "selector": ".user-name", "text": "testuser", "message": "Username should be displayed" }
+  ]
+}
+
+Example test action sequence for a simple element check:
+{
+  "steps": [
+    { "action": "assertSelector", "selector": "#main-navigation", "visible": true, "label": "Check navigation exists", "message": "Main navigation should be visible" },
+    { "action": "assertText", "selector": "h1", "text": "Welcome", "contains": true, "label": "Check page title", "message": "Page should have welcome heading" }
   ]
 }`;
 
@@ -614,17 +668,23 @@ async function getClickableElements(page) {
  * @param {string} pageUrl - URL of the page (for context)
  * @param {string} systemPrompt - The system prompt to use
  * @param {string} taskDescription - Description for the initial message
+ * @param {object} toolSet - The Gemini tool set to use (defaults to all tools)
+ * @param {number|null} sessionId - AI session ID for logging (optional)
  * @returns {object} Generated script or error
  */
-async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription) {
+async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription, toolSet = geminiTools, sessionId = null) {
   if (!genAI) {
+    await updateSessionStatus(sessionId, 'failed', 'Gemini API key not configured');
     return { error: 'Gemini API key not configured' };
   }
 
   try {
+    // Mark session as running
+    await updateSessionStatus(sessionId, 'running');
+    
     const model = genAI.getGenerativeModel({ 
       model: 'gemini-3-pro-preview',
-      tools: geminiTools,
+      tools: toolSet,
       systemInstruction: systemPrompt
     });
 
@@ -633,10 +693,15 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       history: []
     });
 
+    // Log the system prompt
+    await logAiMessage(sessionId, 'system', systemPrompt);
+
+    // Log the initial user prompt
+    const initialMessage = `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`;
+    await logAiMessage(sessionId, 'user', initialMessage);
+
     // Initial message with the task
-    let response = await chat.sendMessage(
-      `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`
-    );
+    let response = await chat.sendMessage(initialMessage);
 
     // Tool use loop (max 10 iterations to prevent infinite loops)
     for (let i = 0; i < 10; i++) {
@@ -654,23 +719,36 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       if (functionCalls.length === 0) {
         // No more function calls - check if we got a text response
         const text = content.parts.find(p => p.text)?.text;
-        return { error: 'No script generated. Model response: ' + (text || 'empty') };
+        const errorMsg = 'No script generated. Model response: ' + (text || 'empty');
+        await logAiMessage(sessionId, 'assistant', text || 'No response');
+        await updateSessionStatus(sessionId, 'failed', errorMsg);
+        return { error: errorMsg };
       }
 
       // Execute function calls
       const functionResponses = [];
       for (const call of functionCalls) {
         console.log(`Gemini tool call: ${call.name}`, call.args);
+        
+        // Log the tool call
+        await logAiMessage(sessionId, 'tool_call', JSON.stringify(call.args || {}), call.name);
+        
         const result = await executeTool(page, call.name, call.args || {});
         
         // Check if this is the final script
         if (result.type === 'script') {
+          // Log the final script generation
+          await logAiMessage(sessionId, 'assistant', `Generated ${result.scriptType} script: ${result.explanation}`);
+          await updateSessionStatus(sessionId, 'completed');
           return {
             script: result.script,
             scriptType: result.scriptType || 'eval',
             explanation: result.explanation
           };
         }
+        
+        // Log the tool result
+        await logAiMessage(sessionId, 'tool_result', JSON.stringify(result), call.name);
         
         functionResponses.push({
           functionResponse: {
@@ -684,10 +762,13 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       response = await chat.sendMessage(functionResponses);
     }
 
-    return { error: 'Max iterations reached without generating a script' };
+    const errorMsg = 'Max iterations reached without generating a script';
+    await updateSessionStatus(sessionId, 'failed', errorMsg);
+    return { error: errorMsg };
 
   } catch (error) {
     console.error('Gemini error:', error);
+    await updateSessionStatus(sessionId, 'failed', error.message);
     return { error: error.message };
   }
 }
@@ -697,15 +778,18 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
+ * @param {number|null} sessionId - AI session ID for logging (optional)
  * @returns {object} Generated script or error
  */
-async function generateScript(page, prompt, pageUrl) {
+async function generateScript(page, prompt, pageUrl, sessionId = null) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     SYSTEM_PROMPT, 
-    'User instruction'
+    'User instruction',
+    simpleGeminiTools,  // Simple mode - only generateScript tool available
+    sessionId
   );
 }
 
@@ -714,51 +798,58 @@ async function generateScript(page, prompt, pageUrl) {
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language test description
  * @param {string} pageUrl - URL of the page (for context)
+ * @param {number|null} sessionId - AI session ID for logging (optional)
  * @returns {object} Generated test script or error
  */
-async function generateTestScript(page, prompt, pageUrl) {
+async function generateTestScript(page, prompt, pageUrl, sessionId = null) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     TEST_SYSTEM_PROMPT, 
-    'Test to verify'
+    'Test to verify',
+    simpleGeminiTools,  // Simple mode - only generateScript tool available
+    sessionId
   );
 }
 
 /**
- * Generate an action script that can use either eval or action DSL mode
- * Gemini decides based on the complexity of the instruction
+ * Generate an action script using action DSL mode (always produces action sequences)
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
- * @returns {object} Generated script with scriptType ('eval' or 'actions')
+ * @param {number|null} sessionId - AI session ID for logging (optional)
+ * @returns {object} Generated script with scriptType 'actions'
  */
-async function generateActionScript(page, prompt, pageUrl) {
+async function generateActionScript(page, prompt, pageUrl, sessionId = null) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     ACTION_SYSTEM_PROMPT, 
-    'User instruction'
+    'User instruction',
+    actionGeminiTools,  // Action mode - only generateActionSequence available
+    sessionId
   );
 }
 
 /**
- * Generate a test script that can use either eval or action DSL mode
- * Gemini decides based on the complexity of the test
+ * Generate a test script using action DSL mode (always produces action sequences)
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language test description
  * @param {string} pageUrl - URL of the page (for context)
- * @returns {object} Generated script with scriptType ('eval' or 'actions')
+ * @param {number|null} sessionId - AI session ID for logging (optional)
+ * @returns {object} Generated script with scriptType 'actions'
  */
-async function generateActionTestScript(page, prompt, pageUrl) {
+async function generateActionTestScript(page, prompt, pageUrl, sessionId = null) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     ACTION_TEST_SYSTEM_PROMPT, 
-    'Test to verify'
+    'Test to verify',
+    actionGeminiTools,  // Action mode - only generateActionSequence available
+    sessionId
   );
 }
 

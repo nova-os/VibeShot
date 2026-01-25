@@ -15,10 +15,11 @@ class TestGenerator {
    * @param {string} prompt - User's test description in natural language
    * @param {object} options - Additional options
    * @param {number} options.pageId - Page ID for logging context
+   * @param {number} options.sessionId - AI session ID for logging
    * @returns {object} Generated test script and metadata
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop', pageId = null } = options;
+    const { viewport = 'desktop', pageId = null, sessionId = null } = options;
     
     console.log(`TestGenerator: Generating test for ${pageUrl}`);
     console.log(`TestGenerator: Prompt: "${prompt}"`);
@@ -59,7 +60,7 @@ class TestGenerator {
 
       // Generate test script using Gemini
       console.log('TestGenerator: Calling Gemini for test generation');
-      const result = await generateTestScript(page, prompt, pageUrl);
+      const result = await generateTestScript(page, prompt, pageUrl, sessionId);
 
       if (result.error) {
         console.error('TestGenerator: Generation failed:', result.error);
@@ -77,6 +78,7 @@ class TestGenerator {
         return {
           success: true,
           script: result.script,
+          scriptType: result.scriptType || 'eval',
           explanation: result.explanation,
           warning: `Test script generated but validation failed: ${validation.error}`
         };
@@ -87,6 +89,7 @@ class TestGenerator {
       return {
         success: true,
         script: result.script,
+        scriptType: result.scriptType || 'eval',
         explanation: result.explanation,
         validationResult: validation.result
       };

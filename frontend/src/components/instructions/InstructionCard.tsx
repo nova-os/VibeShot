@@ -5,6 +5,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
 import { ActionSequenceDisplay } from '@/components/ui/action-sequence-display'
+import { AiChatHistoryDialog } from '@/components/ai/AiChatHistoryDialog'
 import { Instruction, api } from '@/lib/api'
 import { cn, formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -32,6 +33,7 @@ export function InstructionCard({
 }: InstructionCardProps) {
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [isToggling, setIsToggling] = useState(false)
+  const [showChatHistory, setShowChatHistory] = useState(false)
 
   const hasScript = instruction.script && instruction.script.trim().length > 0
   const hasError = instruction.last_error && instruction.last_error.trim().length > 0
@@ -138,6 +140,14 @@ export function InstructionCard({
             onCheckedChange={handleToggle}
             disabled={isToggling}
           />
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setShowChatHistory(true)}
+            title="View AI generation history"
+          >
+            <Icon name="smart_toy" size="sm" />
+          </Button>
           <Button variant="ghost" size="icon" onClick={onEdit}>
             <Icon name="edit" size="sm" />
           </Button>
@@ -195,6 +205,15 @@ export function InstructionCard({
           </div>
         </details>
       )}
+
+      {/* AI Chat History Dialog */}
+      <AiChatHistoryDialog
+        open={showChatHistory}
+        onOpenChange={setShowChatHistory}
+        type="instruction"
+        targetId={instruction.id}
+        targetName={instruction.name}
+      />
     </Card>
   )
 }

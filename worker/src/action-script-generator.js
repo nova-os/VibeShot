@@ -17,10 +17,11 @@ class ActionScriptGenerator {
    * @param {string} pageUrl - URL of the page to analyze
    * @param {string} prompt - User's instruction in natural language
    * @param {object} options - Additional options
+   * @param {number} options.sessionId - AI session ID for logging
    * @returns {object} Generated script and metadata including scriptType
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop' } = options;
+    const { viewport = 'desktop', sessionId = null } = options;
     
     console.log(`ActionScriptGenerator: Generating script for ${pageUrl}`);
     console.log(`ActionScriptGenerator: Prompt: "${prompt}"`);
@@ -60,7 +61,7 @@ class ActionScriptGenerator {
 
       // Generate script using Gemini (may return eval or actions mode)
       console.log('ActionScriptGenerator: Calling Gemini for script generation');
-      const result = await generateActionScript(page, prompt, pageUrl);
+      const result = await generateActionScript(page, prompt, pageUrl, sessionId);
 
       if (result.error) {
         console.error('ActionScriptGenerator: Generation failed:', result.error);

@@ -17,10 +17,11 @@ class ActionTestGenerator {
    * @param {string} pageUrl - URL of the page to analyze
    * @param {string} prompt - User's test description in natural language
    * @param {object} options - Additional options
+   * @param {number} options.sessionId - AI session ID for logging
    * @returns {object} Generated test script and metadata including scriptType
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop' } = options;
+    const { viewport = 'desktop', sessionId = null } = options;
     
     console.log(`ActionTestGenerator: Generating test for ${pageUrl}`);
     console.log(`ActionTestGenerator: Prompt: "${prompt}"`);
@@ -60,7 +61,7 @@ class ActionTestGenerator {
 
       // Generate test script using Gemini (may return eval or actions mode)
       console.log('ActionTestGenerator: Calling Gemini for test generation');
-      const result = await generateActionTestScript(page, prompt, pageUrl);
+      const result = await generateActionTestScript(page, prompt, pageUrl, sessionId);
 
       if (result.error) {
         console.error('ActionTestGenerator: Generation failed:', result.error);

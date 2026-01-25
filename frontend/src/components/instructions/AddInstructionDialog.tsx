@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Icon } from '@/components/ui/icon'
+import { AiChatPanel } from '@/components/ai/AiChatPanel'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 
@@ -41,6 +42,8 @@ export function AddInstructionDialog({
   const [viewport, setViewport] = useState('desktop')
   const [useActions, setUseActions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [sessionId, setSessionId] = useState<number | null>(null)
+  const [isComplete, setIsComplete] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,28 +52,81 @@ export function AddInstructionDialog({
     try {
       const instruction = await api.createInstruction(pageId, { name, prompt, viewport, useActions })
       
-      if (instruction.generationError) {
-        toast.error(`Instruction created but script generation failed: ${instruction.generationError}`)
-      } else if (instruction.script) {
-        const modeLabel = instruction.script_type === 'actions' ? 'action sequence' : 'script'
-        toast.success(`Instruction created with AI-generated ${modeLabel}`)
+      if (instruction.sessionId) {
+        // Show the chat panel for live updates
+        setSessionId(instruction.sessionId)
       } else {
+        // Fallback for when no session is created (shouldn't happen normally)
         toast.success('Instruction created')
+        handleClose()
+        onSuccess()
       }
-      
-      setName('')
-      setPrompt('')
-      setViewport('desktop')
-      setUseActions(false)
-      onOpenChange(false)
-      onSuccess()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create instruction')
-    } finally {
       setIsLoading(false)
     }
   }
 
+  const handleGenerationComplete = () => {
+    setIsComplete(true)
+  }
+
+  const handleClose = () => {
+    // Reset state
+    setName('')
+    setPrompt('')
+    setViewport('desktop')
+    setUseActions(false)
+    setIsLoading(false)
+    setSessionId(null)
+    setIsComplete(false)
+    onOpenChange(false)
+  }
+
+  const handleFinish = () => {
+    toast.success('Instruction created with AI-generated script')
+    handleClose()
+    onSuccess()
+  }
+
+  // Show chat panel when generating
+  if (sessionId) {
+    return (
+      <Dialog open={open} onOpenChange={(open) => !open && handleClose()}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Generating Script</DialogTitle>
+            <DialogDescription>
+              AI is analyzing the page and generating the script for "{name}"
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 min-h-[300px] overflow-hidden flex flex-col">
+            <AiChatPanel 
+              sessionId={sessionId} 
+              onComplete={handleGenerationComplete}
+              className="flex-1 min-h-0"
+            />
+          </div>
+          
+          <DialogFooter>
+            {isComplete ? (
+              <Button onClick={handleFinish}>
+                <Icon name="check" size="sm" />
+                Done
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={handleClose}>
+                Cancel
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // Show form
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -147,7 +203,7 @@ export function AddInstructionDialog({
               {isLoading ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
-                  Generating script...
+                  Starting...
                 </>
               ) : (
                 'Create Instruction'

@@ -171,3 +171,28 @@ CREATE TABLE IF NOT EXISTS test_results (
     INDEX idx_test_id (test_id),
     INDEX idx_screenshot_id (screenshot_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI generation sessions (tracks instruction/test script generation)
+CREATE TABLE IF NOT EXISTS ai_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    type ENUM('instruction', 'test') NOT NULL,
+    target_id INT NOT NULL,  -- instruction_id or test_id
+    status ENUM('pending', 'running', 'completed', 'failed') DEFAULT 'pending',
+    error_message TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP NULL,
+    INDEX idx_target (type, target_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI interaction messages (tool calls, responses, etc.)
+CREATE TABLE IF NOT EXISTS ai_messages (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id INT NOT NULL,
+    role ENUM('system', 'user', 'assistant', 'tool_call', 'tool_result') NOT NULL,
+    content TEXT NOT NULL,
+    tool_name VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    INDEX idx_session (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

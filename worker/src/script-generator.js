@@ -15,10 +15,11 @@ class ScriptGenerator {
    * @param {string} prompt - User's instruction in natural language
    * @param {object} options - Additional options
    * @param {number} options.pageId - Page ID for logging context
+   * @param {number} options.sessionId - AI session ID for logging
    * @returns {object} Generated script and metadata
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop', pageId = null } = options;
+    const { viewport = 'desktop', pageId = null, sessionId = null } = options;
     
     console.log(`ScriptGenerator: Generating script for ${pageUrl}`);
     console.log(`ScriptGenerator: Prompt: "${prompt}"`);
@@ -59,7 +60,7 @@ class ScriptGenerator {
 
       // Generate script using Gemini
       console.log('ScriptGenerator: Calling Gemini for script generation');
-      const result = await generateScript(page, prompt, pageUrl);
+      const result = await generateScript(page, prompt, pageUrl, sessionId);
 
       if (result.error) {
         console.error('ScriptGenerator: Generation failed:', result.error);
@@ -77,6 +78,7 @@ class ScriptGenerator {
         return {
           success: true,
           script: result.script,
+          scriptType: result.scriptType || 'eval',
           explanation: result.explanation,
           warning: `Script generated but validation failed: ${validation.error}`
         };
@@ -87,6 +89,7 @@ class ScriptGenerator {
       return {
         success: true,
         script: result.script,
+        scriptType: result.scriptType || 'eval',
         explanation: result.explanation
       };
 

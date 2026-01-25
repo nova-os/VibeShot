@@ -107,6 +107,7 @@ export interface Instruction {
   error_count: number
   created_at: string
   generationError?: string
+  sessionId?: number  // AI session ID for tracking generation
 }
 
 export interface Test {
@@ -122,6 +123,7 @@ export interface Test {
   created_at: string
   updated_at: string
   generationError?: string
+  sessionId?: number  // AI session ID for tracking generation
 }
 
 export interface TestResult {
@@ -141,6 +143,35 @@ export interface TestResultsResponse {
     total: number
     passed: number
     failed: number
+  }
+}
+
+export interface AiSession {
+  id: number
+  type: 'instruction' | 'test'
+  target_id: number
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  error_message: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface AiMessage {
+  id: number
+  session_id: number
+  role: 'system' | 'user' | 'assistant' | 'tool_call' | 'tool_result'
+  content: string
+  tool_name: string | null
+  created_at: string
+}
+
+export interface AiMessagesResponse {
+  messages: AiMessage[]
+  session: {
+    id: number
+    status: AiSession['status']
+    error_message: string | null
+    completed_at: string | null
   }
 }
 
@@ -552,6 +583,20 @@ class ApiClient {
 
   async getScreenshotTestResults(screenshotId: number): Promise<TestResultsResponse> {
     return this.request<TestResultsResponse>(`/screenshots/${screenshotId}/test-results`)
+  }
+
+  // AI Sessions endpoints
+  async getAiSession(sessionId: number): Promise<AiSession> {
+    return this.request<AiSession>(`/ai-sessions/${sessionId}`)
+  }
+
+  async getLatestAiSession(type: 'instruction' | 'test', targetId: number): Promise<AiSession> {
+    return this.request<AiSession>(`/ai-sessions/latest/${type}/${targetId}`)
+  }
+
+  async getAiMessages(sessionId: number, afterId?: number): Promise<AiMessagesResponse> {
+    const params = afterId ? `?after=${afterId}` : ''
+    return this.request<AiMessagesResponse>(`/ai-sessions/${sessionId}/messages${params}`)
   }
 }
 

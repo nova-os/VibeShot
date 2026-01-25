@@ -487,50 +487,76 @@ router.post('/:id/instructions', async (req, res) => {
     );
     const nextOrder = (maxOrder[0].max_order || 0) + 1;
 
-    // Call worker to generate script
-    // Use action DSL endpoint if useActions is true
+    // Insert instruction first (so we have an ID for the AI session)
+    const [insertResult] = await db.query(
+      `INSERT INTO instructions (page_id, name, prompt, script, script_type, execution_order)
+       VALUES (?, ?, ?, NULL, 'eval', ?)`,
+      [req.params.id, name, prompt, nextOrder]
+    );
+    const instructionId = insertResult.insertId;
+
+    // Create AI session for tracking the generation
+    const [sessionResult] = await db.query(
+      `INSERT INTO ai_sessions (type, target_id, status) VALUES ('instruction', ?, 'pending')`,
+      [instructionId]
+    );
+    const sessionId = sessionResult.insertId;
+
+    // Call worker to generate script (don't wait - return immediately so frontend can poll)
     const endpoint = useActions ? '/generate-action-script' : '/generate-script';
     console.log(`Generating script for page ${page.url} with prompt: "${prompt}" (${useActions ? 'actions' : 'eval'} mode)`);
     
-    let script = null;
-    let scriptType = 'eval';
-    let generationError = null;
+    // Start generation in background and update instruction when done
+    (async () => {
+      let script = null;
+      let scriptType = 'eval';
+      let generationError = null;
 
-    try {
-      const result = await callWorkerApi(endpoint, {
-        pageUrl: page.url,
-        prompt,
-        viewport: viewport || 'desktop'
-      });
+      try {
+        const result = await callWorkerApi(endpoint, {
+          pageUrl: page.url,
+          prompt,
+          viewport: viewport || 'desktop',
+          sessionId
+        });
 
-      if (result.success) {
-        script = result.script;
-        scriptType = result.scriptType || 'eval';
-      } else {
-        generationError = result.error;
-        console.error('Script generation failed:', result.error);
+        if (result.success) {
+          script = result.script;
+          scriptType = result.scriptType || 'eval';
+        } else {
+          generationError = result.error;
+          console.error('Script generation failed:', result.error);
+        }
+      } catch (err) {
+        generationError = err.message;
+        console.error('Worker API call failed:', err.message);
       }
-    } catch (err) {
-      generationError = err.message;
-      console.error('Worker API call failed:', err.message);
-    }
 
-    // Insert instruction (even if script generation failed - user can regenerate)
-    const [insertResult] = await db.query(
-      `INSERT INTO instructions (page_id, name, prompt, script, script_type, execution_order)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [req.params.id, name, prompt, script, scriptType, nextOrder]
-    );
+      // Update instruction with the generated script
+      if (script) {
+        await db.query(
+          'UPDATE instructions SET script = ?, script_type = ? WHERE id = ?',
+          [script, scriptType, instructionId]
+        );
+      }
 
+      // If there was an error but session wasn't updated by worker, update it now
+      if (generationError) {
+        await db.query(
+          `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+          [generationError, sessionId]
+        );
+      }
+    })();
+
+    // Return instruction immediately with session ID so frontend can start polling
     const [instructions] = await db.query(
       'SELECT * FROM instructions WHERE id = ?',
-      [insertResult.insertId]
+      [instructionId]
     );
 
     const response = instructions[0];
-    if (generationError) {
-      response.generationError = generationError;
-    }
+    response.sessionId = sessionId;
 
     res.status(201).json(response);
   } catch (error) {
@@ -685,6 +711,14 @@ router.post('/:id/instructions/:instructionId/regenerate', async (req, res) => {
     }
 
     const instruction = instructions[0];
+    const instructionId = parseInt(req.params.instructionId);
+    
+    // Create AI session for tracking the regeneration
+    const [sessionResult] = await db.query(
+      `INSERT INTO ai_sessions (type, target_id, status) VALUES ('instruction', ?, 'pending')`,
+      [instructionId]
+    );
+    const sessionId = sessionResult.insertId;
     
     // Determine which endpoint to use
     // If useActions is explicitly set, use that; otherwise preserve current script_type
@@ -696,32 +730,41 @@ router.post('/:id/instructions/:instructionId/regenerate', async (req, res) => {
     // Call worker to regenerate script
     console.log(`Regenerating script for instruction ${instruction.id} (${shouldUseActions ? 'actions' : 'eval'} mode)`);
     
-    try {
-      const result = await callWorkerApi(endpoint, {
-        pageUrl: page.url,
-        prompt: instruction.prompt,
-        viewport: viewport || 'desktop'
-      });
+    // Start generation in background and update instruction when done
+    (async () => {
+      try {
+        const result = await callWorkerApi(endpoint, {
+          pageUrl: page.url,
+          prompt: instruction.prompt,
+          viewport: viewport || 'desktop',
+          sessionId
+        });
 
-      if (result.success) {
-        const scriptType = result.scriptType || 'eval';
+        if (result.success) {
+          const scriptType = result.scriptType || 'eval';
+          await db.query(
+            'UPDATE instructions SET script = ?, script_type = ? WHERE id = ?',
+            [result.script, scriptType, instructionId]
+          );
+        } else {
+          // If session wasn't updated by worker, update it now
+          await db.query(
+            `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+            [result.error, sessionId]
+          );
+        }
+      } catch (err) {
+        console.error('Worker API call failed:', err.message);
         await db.query(
-          'UPDATE instructions SET script = ?, script_type = ? WHERE id = ?',
-          [result.script, scriptType, req.params.instructionId]
+          `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+          [err.message, sessionId]
         );
-
-        const [updated] = await db.query(
-          'SELECT * FROM instructions WHERE id = ?',
-          [req.params.instructionId]
-        );
-
-        res.json(updated[0]);
-      } else {
-        res.status(500).json({ error: 'Script generation failed: ' + result.error });
       }
-    } catch (err) {
-      res.status(500).json({ error: 'Worker API call failed: ' + err.message });
-    }
+    })();
+
+    // Return immediately with session ID so frontend can start polling
+    const response = { ...instruction, sessionId };
+    res.json(response);
   } catch (error) {
     console.error('Regenerate instruction error:', error);
     res.status(500).json({ error: 'Failed to regenerate instruction' });
@@ -780,46 +823,73 @@ router.post('/:id/tests', async (req, res) => {
     );
     const nextOrder = (maxOrder[0].max_order || 0) + 1;
 
-    // Call worker to generate test script
-    // Use action DSL endpoint if useActions is true
-    const endpoint = useActions ? '/generate-action-test' : '/generate-test';
-    console.log(`Generating test for page ${page.url} with prompt: "${prompt}" (${useActions ? 'actions' : 'eval'} mode)`);
-    
-    let script = null;
-    let scriptType = 'eval';
-    let generationError = null;
-
-    try {
-      const result = await callWorkerApi(endpoint, {
-        pageUrl: page.url,
-        prompt,
-        viewport: viewport || 'desktop'
-      });
-
-      if (result.success) {
-        script = result.script;
-        scriptType = result.scriptType || 'eval';
-      } else {
-        generationError = result.error;
-        console.error('Test generation failed:', result.error);
-      }
-    } catch (err) {
-      generationError = err.message;
-      console.error('Worker API call failed:', err.message);
-    }
-
-    // Insert test (even if script generation failed - user can regenerate)
-    // viewports: null = all viewports, or array like ["desktop", "mobile"]
+    // Insert test first (so we have an ID for the AI session)
     const viewportsJson = viewports && viewports.length > 0 ? JSON.stringify(viewports) : null;
     const [insertResult] = await db.query(
       `INSERT INTO tests (page_id, name, prompt, script, script_type, execution_order, viewports)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [req.params.id, name, prompt, script, scriptType, nextOrder, viewportsJson]
+       VALUES (?, ?, ?, NULL, 'eval', ?, ?)`,
+      [req.params.id, name, prompt, nextOrder, viewportsJson]
     );
+    const testId = insertResult.insertId;
 
+    // Create AI session for tracking the generation
+    const [sessionResult] = await db.query(
+      `INSERT INTO ai_sessions (type, target_id, status) VALUES ('test', ?, 'pending')`,
+      [testId]
+    );
+    const sessionId = sessionResult.insertId;
+
+    // Call worker to generate test script (don't wait - return immediately so frontend can poll)
+    const endpoint = useActions ? '/generate-action-test' : '/generate-test';
+    console.log(`Generating test for page ${page.url} with prompt: "${prompt}" (${useActions ? 'actions' : 'eval'} mode)`);
+    
+    // Start generation in background and update test when done
+    (async () => {
+      let script = null;
+      let scriptType = 'eval';
+      let generationError = null;
+
+      try {
+        const result = await callWorkerApi(endpoint, {
+          pageUrl: page.url,
+          prompt,
+          viewport: viewport || 'desktop',
+          sessionId
+        });
+
+        if (result.success) {
+          script = result.script;
+          scriptType = result.scriptType || 'eval';
+        } else {
+          generationError = result.error;
+          console.error('Test generation failed:', result.error);
+        }
+      } catch (err) {
+        generationError = err.message;
+        console.error('Worker API call failed:', err.message);
+      }
+
+      // Update test with the generated script
+      if (script) {
+        await db.query(
+          'UPDATE tests SET script = ?, script_type = ? WHERE id = ?',
+          [script, scriptType, testId]
+        );
+      }
+
+      // If there was an error but session wasn't updated by worker, update it now
+      if (generationError) {
+        await db.query(
+          `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+          [generationError, sessionId]
+        );
+      }
+    })();
+
+    // Return test immediately with session ID so frontend can start polling
     const [tests] = await db.query(
       'SELECT * FROM tests WHERE id = ?',
-      [insertResult.insertId]
+      [testId]
     );
 
     const response = tests[0];
@@ -827,9 +897,7 @@ router.post('/:id/tests', async (req, res) => {
     if (response.viewports && typeof response.viewports === 'string') {
       response.viewports = JSON.parse(response.viewports);
     }
-    if (generationError) {
-      response.generationError = generationError;
-    }
+    response.sessionId = sessionId;
 
     res.status(201).json(response);
   } catch (error) {
@@ -995,6 +1063,14 @@ router.post('/:id/tests/:testId/regenerate', async (req, res) => {
     }
 
     const test = tests[0];
+    const testId = parseInt(req.params.testId);
+    
+    // Create AI session for tracking the regeneration
+    const [sessionResult] = await db.query(
+      `INSERT INTO ai_sessions (type, target_id, status) VALUES ('test', ?, 'pending')`,
+      [testId]
+    );
+    const sessionId = sessionResult.insertId;
     
     // Determine which endpoint to use
     // If useActions is explicitly set, use that; otherwise preserve current script_type
@@ -1006,38 +1082,45 @@ router.post('/:id/tests/:testId/regenerate', async (req, res) => {
     // Call worker to regenerate test script
     console.log(`Regenerating test script for test ${test.id} (${shouldUseActions ? 'actions' : 'eval'} mode)`);
     
-    try {
-      const result = await callWorkerApi(endpoint, {
-        pageUrl: page.url,
-        prompt: test.prompt,
-        viewport: viewport || 'desktop'
-      });
+    // Start generation in background and update test when done
+    (async () => {
+      try {
+        const result = await callWorkerApi(endpoint, {
+          pageUrl: page.url,
+          prompt: test.prompt,
+          viewport: viewport || 'desktop',
+          sessionId
+        });
 
-      if (result.success) {
-        const scriptType = result.scriptType || 'eval';
-        await db.query(
-          'UPDATE tests SET script = ?, script_type = ? WHERE id = ?',
-          [result.script, scriptType, req.params.testId]
-        );
-
-        const [updated] = await db.query(
-          'SELECT * FROM tests WHERE id = ?',
-          [req.params.testId]
-        );
-
-        const updatedTest = updated[0];
-        // Parse viewports JSON
-        if (updatedTest.viewports && typeof updatedTest.viewports === 'string') {
-          updatedTest.viewports = JSON.parse(updatedTest.viewports);
+        if (result.success) {
+          const scriptType = result.scriptType || 'eval';
+          await db.query(
+            'UPDATE tests SET script = ?, script_type = ? WHERE id = ?',
+            [result.script, scriptType, testId]
+          );
+        } else {
+          // If session wasn't updated by worker, update it now
+          await db.query(
+            `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+            [result.error, sessionId]
+          );
         }
-
-        res.json(updatedTest);
-      } else {
-        res.status(500).json({ error: 'Test generation failed: ' + result.error });
+      } catch (err) {
+        console.error('Worker API call failed:', err.message);
+        await db.query(
+          `UPDATE ai_sessions SET status = 'failed', error_message = ?, completed_at = NOW() WHERE id = ? AND status != 'completed'`,
+          [err.message, sessionId]
+        );
       }
-    } catch (err) {
-      res.status(500).json({ error: 'Worker API call failed: ' + err.message });
+    })();
+
+    // Return immediately with session ID so frontend can start polling
+    // Parse viewports JSON
+    if (test.viewports && typeof test.viewports === 'string') {
+      test.viewports = JSON.parse(test.viewports);
     }
+    const response = { ...test, sessionId };
+    res.json(response);
   } catch (error) {
     console.error('Regenerate test error:', error);
     res.status(500).json({ error: 'Failed to regenerate test' });

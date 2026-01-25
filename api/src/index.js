@@ -8,6 +8,7 @@ const sitesRoutes = require('./routes/sites');
 const pagesRoutes = require('./routes/pages');
 const screenshotsRoutes = require('./routes/screenshots');
 const settingsRoutes = require('./routes/settings');
+const aiSessionsRoutes = require('./routes/ai-sessions');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,7 @@ app.use('/api/sites', sitesRoutes);
 app.use('/api/pages', pagesRoutes);
 app.use('/api/screenshots', screenshotsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/ai-sessions', aiSessionsRoutes);
 
 // Serve screenshots
 app.use('/screenshots', express.static(path.join(__dirname, '../screenshots')));

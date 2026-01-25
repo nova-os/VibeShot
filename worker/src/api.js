@@ -46,7 +46,7 @@ class WorkerApi {
 
     // Generate script endpoint (for instructions/actions - simple eval mode)
     this.app.post('/generate-script', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, sessionId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -55,7 +55,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport, sessionId });
         
         if (result.success) {
           res.json({
@@ -82,7 +82,7 @@ class WorkerApi {
 
     // Generate test endpoint (for assertions/tests)
     this.app.post('/generate-test', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, sessionId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -91,7 +91,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport, sessionId });
         
         if (result.success) {
           res.json({
@@ -120,7 +120,7 @@ class WorkerApi {
     // Generate action script endpoint (supports both eval and action DSL modes)
     // AI decides which mode to use based on instruction complexity
     this.app.post('/generate-action-script', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, sessionId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -129,7 +129,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.actionScriptGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.actionScriptGenerator.generate(pageUrl, prompt, { viewport, sessionId });
         
         if (result.success) {
           res.json({
@@ -157,7 +157,7 @@ class WorkerApi {
     // Generate action test endpoint (supports both eval and action DSL modes)
     // AI decides which mode to use based on test complexity
     this.app.post('/generate-action-test', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, sessionId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -166,7 +166,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.actionTestGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.actionTestGenerator.generate(pageUrl, prompt, { viewport, sessionId });
         
         if (result.success) {
           res.json({
