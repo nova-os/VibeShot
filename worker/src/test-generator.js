@@ -1,5 +1,4 @@
 const { generateTestScript } = require('./gemini');
-const { createConversation, addMessage, completeConversation } = require('./conversation-logger');
 
 /**
  * Test Generator - Orchestrates the generation of page test scripts
@@ -16,33 +15,18 @@ class TestGenerator {
    * @param {string} prompt - User's test description in natural language
    * @param {object} options - Additional options
    * @param {number} options.pageId - Page ID for logging context
-   * @param {boolean} options.liveUpdates - Enable live conversation updates (default: true)
-   * @returns {object} Generated test script and metadata including conversationId
+   * @returns {object} Generated test script and metadata
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop', pageId = null, liveUpdates = true } = options;
+    const { viewport = 'desktop', pageId = null } = options;
     
     console.log(`TestGenerator: Generating test for ${pageUrl}`);
     console.log(`TestGenerator: Prompt: "${prompt}"`);
 
     let browser = null;
     let page = null;
-    let conversationId = null;
-    const startTime = Date.now();
 
     try {
-      // Create conversation record for live updates
-      if (liveUpdates) {
-        conversationId = await createConversation({
-          contextType: 'test',
-          pageId,
-          pageUrl,
-          prompt,
-          systemPromptType: 'test',
-          modelName: 'gemini-3-pro-preview'
-        });
-      }
-
       // Acquire browser from pool
       browser = await this.browserPool.acquire();
       
@@ -64,14 +48,6 @@ class TestGenerator {
 
       // Navigate to the page
       console.log(`TestGenerator: Navigating to ${pageUrl}`);
-      if (liveUpdates && conversationId) {
-        await addMessage(conversationId, {
-          role: 'system',
-          content: `Navigating to ${pageUrl}`,
-          timestamp: new Date().toISOString(),
-          type: 'navigation'
-        }, 'Loading page...');
-      }
       
       await page.goto(pageUrl, {
         waitUntil: 'networkidle2',
@@ -81,96 +57,43 @@ class TestGenerator {
       // Wait for initial content
       await this.sleep(1000);
 
-      // Create onMessage callback for live updates
-      const onMessage = liveUpdates && conversationId 
-        ? async (message, currentStep) => {
-            await addMessage(conversationId, message, currentStep);
-          }
-        : null;
-
       // Generate test script using Gemini
       console.log('TestGenerator: Calling Gemini for test generation');
-      const result = await generateTestScript(page, prompt, pageUrl, { onMessage });
+      const result = await generateTestScript(page, prompt, pageUrl);
 
       if (result.error) {
         console.error('TestGenerator: Generation failed:', result.error);
-        // Complete conversation with failure
-        if (liveUpdates && conversationId) {
-          await completeConversation(conversationId, {
-            success: false,
-            error: result.error,
-            durationMs: Date.now() - startTime
-          });
-        }
-        return { success: false, error: result.error, conversationId };
+        return { success: false, error: result.error };
       }
 
       // Validate the generated test script by executing it
       console.log('TestGenerator: Validating generated test script');
-      if (liveUpdates && conversationId) {
-        await addMessage(conversationId, {
-          role: 'system',
-          content: 'Validating generated test script...',
-          timestamp: new Date().toISOString(),
-          type: 'validation'
-        }, 'Validating test...');
-      }
       
       const validation = await this.validateTestScript(page, result.script);
 
       if (!validation.success) {
         console.warn('TestGenerator: Test script validation failed:', validation.error);
-        // Complete conversation (with warning, still success)
-        if (liveUpdates && conversationId) {
-          await completeConversation(conversationId, {
-            success: true,  // Script was generated, just validation warning
-            script: result.script,
-            explanation: result.explanation,
-            error: `Validation warning: ${validation.error}`,
-            durationMs: Date.now() - startTime
-          });
-        }
         // Return the script anyway but with a warning
         return {
           success: true,
           script: result.script,
           explanation: result.explanation,
-          warning: `Test script generated but validation failed: ${validation.error}`,
-          conversationId
+          warning: `Test script generated but validation failed: ${validation.error}`
         };
       }
 
       console.log('TestGenerator: Test script generated and validated successfully');
       
-      // Complete conversation with success
-      if (liveUpdates && conversationId) {
-        await completeConversation(conversationId, {
-          success: true,
-          script: result.script,
-          explanation: result.explanation,
-          durationMs: Date.now() - startTime
-        });
-      }
-      
       return {
         success: true,
         script: result.script,
         explanation: result.explanation,
-        validationResult: validation.result,
-        conversationId
+        validationResult: validation.result
       };
 
     } catch (error) {
       console.error('TestGenerator: Error:', error.message);
-      // Complete conversation with error
-      if (liveUpdates && conversationId) {
-        await completeConversation(conversationId, {
-          success: false,
-          error: error.message,
-          durationMs: Date.now() - startTime
-        });
-      }
-      return { success: false, error: error.message, conversationId };
+      return { success: false, error: error.message };
     } finally {
       // Clean up
       if (page) {
