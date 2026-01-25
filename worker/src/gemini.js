@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { ACTION_SCHEMAS } = require('./action-executor');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -8,6 +9,16 @@ if (!GEMINI_API_KEY) {
 
 // Initialize Gemini client
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+
+// Generate documentation for action DSL from schemas
+function generateActionDocs() {
+  const docs = Object.entries(ACTION_SCHEMAS).map(([name, schema]) => {
+    const required = schema.required.length > 0 ? schema.required.join(', ') : 'none';
+    const optional = schema.optional.length > 0 ? schema.optional.join(', ') : 'none';
+    return `  - ${name}: required=[${required}], optional=[${optional}]`;
+  }).join('\n');
+  return docs;
+}
 
 // Tool definitions for Gemini
 const tools = [
@@ -64,6 +75,102 @@ const tools = [
       },
       required: ['script', 'explanation']
     }
+  },
+  {
+    name: 'generateActionSequence',
+    description: 'Generate a sequence of Puppeteer actions for complex multi-step workflows that involve navigation, waiting, or multiple page interactions. Use this instead of generateScript when the task requires page navigation or complex async operations.',
+    parameters: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: 'Array of action objects. Each action has an "action" field and action-specific parameters.',
+          items: {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                description: 'Action type: click, type, clear, select, hover, focus, press, waitForSelector, waitForNavigation, waitForTimeout, waitForFunction, goto, goBack, goForward, reload, scroll, scrollToElement, evaluate, setViewport, assert, assertSelector, assertText, assertUrl, assertTitle'
+              },
+              label: {
+                type: 'string',
+                description: 'Optional human-readable label for this step'
+              },
+              selector: {
+                type: 'string',
+                description: 'CSS selector for element-based actions'
+              },
+              text: {
+                type: 'string',
+                description: 'Text to type or match'
+              },
+              value: {
+                type: 'string',
+                description: 'Value for select actions'
+              },
+              url: {
+                type: 'string',
+                description: 'URL for goto action'
+              },
+              script: {
+                type: 'string',
+                description: 'JavaScript code for evaluate/assert/waitForFunction actions'
+              },
+              timeout: {
+                type: 'number',
+                description: 'Timeout in milliseconds'
+              },
+              ms: {
+                type: 'number',
+                description: 'Milliseconds to wait for waitForTimeout'
+              },
+              key: {
+                type: 'string',
+                description: 'Key to press for press action'
+              },
+              waitUntil: {
+                type: 'string',
+                description: 'Navigation wait condition: load, domcontentloaded, networkidle0, networkidle2'
+              },
+              visible: {
+                type: 'boolean',
+                description: 'Wait for element to be visible'
+              },
+              hidden: {
+                type: 'boolean',
+                description: 'Wait for element to be hidden'
+              },
+              pattern: {
+                type: 'string',
+                description: 'Pattern to match for URL/title assertions'
+              },
+              message: {
+                type: 'string',
+                description: 'Custom failure message for assertions'
+              },
+              exact: {
+                type: 'boolean',
+                description: 'Use exact matching instead of contains'
+              },
+              contains: {
+                type: 'boolean',
+                description: 'Use contains matching (default for text)'
+              },
+              count: {
+                type: 'number',
+                description: 'Expected element count for assertSelector'
+              }
+            },
+            required: ['action']
+          }
+        },
+        explanation: {
+          type: 'string',
+          description: 'Brief explanation of what the action sequence does'
+        }
+      },
+      required: ['steps', 'explanation']
+    }
   }
 ];
 
@@ -76,7 +183,7 @@ const geminiTools = [{
   }))
 }];
 
-// System prompt for script generation (instructions/actions)
+// System prompt for simple script generation (instructions/actions - eval mode)
 const SYSTEM_PROMPT = `You are an expert at web automation and DOM manipulation. Your task is to generate JavaScript code that performs a specific action on a webpage.
 
 You have tools to explore the page:
@@ -104,6 +211,114 @@ Example script format:
 const element = document.querySelector('#menu-toggle');
 if (element) {
   element.click();
+}`;
+
+// System prompt for action DSL generation (complex multi-step instructions)
+const ACTION_SYSTEM_PROMPT = `You are an expert at web automation using Puppeteer. Your task is to generate a sequence of actions that performs a complex workflow on a webpage.
+
+You have tools to explore the page:
+- getAccessibilityTree: See the full page structure
+- querySelector: Test if a CSS selector works
+- getElementDetails: Get info about specific elements
+- getClickableElements: Find all interactive elements
+
+When to use Action Sequences (generateActionSequence) vs Simple Scripts (generateScript):
+- Use ACTION SEQUENCES when the task involves:
+  - Clicking links that navigate to new pages
+  - Filling out forms and submitting them
+  - Multi-step workflows (login, checkout, etc.)
+  - Waiting for elements to appear/disappear
+  - Any operation that requires waiting for navigation
+- Use SIMPLE SCRIPTS for:
+  - Single DOM manipulations (click a button, toggle a menu)
+  - Operations that don't cause navigation
+  - Reading/modifying page content
+
+Available action types:
+${generateActionDocs()}
+
+Process:
+1. First, understand what the user wants to do
+2. Determine if this requires navigation or multi-step workflow (use action sequence) or simple DOM manipulation (use simple script)
+3. Use tools to explore the page and find the right elements
+4. Test selectors to make sure they work
+5. Generate either an action sequence (generateActionSequence) or simple script (generateScript)
+
+Guidelines for action sequences:
+- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)
+- Add waitForSelector before interacting with elements that may not be immediately present
+- Use waitForNavigation after clicks that trigger page loads
+- Add descriptive labels to steps for debugging
+- Use appropriate timeouts (default is usually fine)
+- For forms: use type for text inputs, select for dropdowns, click for checkboxes/buttons
+
+Example action sequence for a login flow:
+{
+  "steps": [
+    { "action": "waitForSelector", "selector": "#username", "label": "Wait for login form" },
+    { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
+    { "action": "type", "selector": "#password", "text": "password123", "label": "Enter password" },
+    { "action": "click", "selector": "#login-button", "label": "Click login" },
+    { "action": "waitForNavigation", "waitUntil": "networkidle2", "label": "Wait for redirect" },
+    { "action": "waitForSelector", "selector": ".dashboard", "label": "Verify dashboard loaded" }
+  ]
+}`;
+
+// System prompt for action DSL test generation
+const ACTION_TEST_SYSTEM_PROMPT = `You are an expert at web testing using Puppeteer. Your task is to generate a sequence of actions that tests specific functionality on a webpage.
+
+You have tools to explore the page:
+- getAccessibilityTree: See the full page structure
+- querySelector: Test if a CSS selector works
+- getElementDetails: Get info about specific elements
+- getClickableElements: Find all interactive elements
+
+When to use Action Sequences (generateActionSequence) vs Simple Scripts (generateScript):
+- Use ACTION SEQUENCES when the test involves:
+  - Navigation between pages
+  - Multi-step user flows (login, form submission, etc.)
+  - Waiting for async operations
+  - Multiple assertions across different states
+- Use SIMPLE SCRIPTS for:
+  - Simple element existence checks
+  - Single-page content verification
+  - Reading page state without navigation
+
+Available action types:
+${generateActionDocs()}
+
+Assertion actions for tests:
+- assertSelector: Check if element exists, is visible, or has specific count
+- assertText: Check element text content (exact or contains)
+- assertUrl: Check current URL matches pattern
+- assertTitle: Check page title matches pattern
+- assert: Run custom JavaScript assertion that returns { passed: boolean, message: string }
+
+Process:
+1. First, understand what the user wants to test
+2. Determine if this requires navigation/multi-step flow (use action sequence) or simple assertion (use simple script)
+3. Use tools to explore the page and find the right elements
+4. Test selectors to make sure they work
+5. Generate the test
+
+Guidelines for test action sequences:
+- Start with setup steps (navigate, click, fill forms)
+- End with assertion steps to verify the expected state
+- Add descriptive labels for debugging
+- Include meaningful error messages in assertions
+- Use multiple assertions to verify different aspects
+
+Example test action sequence for verifying login:
+{
+  "steps": [
+    { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
+    { "action": "type", "selector": "#password", "text": "password123", "label": "Enter password" },
+    { "action": "click", "selector": "#login-button", "label": "Click login" },
+    { "action": "waitForNavigation", "label": "Wait for redirect" },
+    { "action": "assertUrl", "pattern": "/dashboard", "message": "Should redirect to dashboard" },
+    { "action": "assertSelector", "selector": ".welcome-message", "visible": true, "message": "Welcome message should be visible" },
+    { "action": "assertText", "selector": ".user-name", "text": "testuser", "message": "Username should be displayed" }
+  ]
 }`;
 
 // System prompt for test generation (assertions)
@@ -208,8 +423,17 @@ async function executeTool(page, toolName, args = {}) {
       return await getClickableElements(page);
     
     case 'generateScript':
-      // This is the final output - return as-is
-      return { type: 'script', script: args.script, explanation: args.explanation };
+      // This is the final output - return as-is (eval mode)
+      return { type: 'script', scriptType: 'eval', script: args.script, explanation: args.explanation };
+    
+    case 'generateActionSequence':
+      // This is the final output for action DSL mode
+      return { 
+        type: 'script', 
+        scriptType: 'actions', 
+        script: JSON.stringify({ steps: args.steps }, null, 2), 
+        explanation: args.explanation 
+      };
     
     default:
       return { error: `Unknown tool: ${toolName}` };
@@ -383,6 +607,8 @@ async function getClickableElements(page) {
   }
 }
 
+const MODEL_NAME = 'gemini-3-pro-preview';
+
 /**
  * Internal function to generate script with specified system prompt
  * @param {Page} page - Puppeteer page instance
@@ -390,18 +616,69 @@ async function getClickableElements(page) {
  * @param {string} pageUrl - URL of the page (for context)
  * @param {string} systemPrompt - The system prompt to use
  * @param {string} taskDescription - Description for the initial message
- * @returns {object} Generated script or error
+ * @param {string} systemPromptType - Type identifier for logging ('simple', 'action', 'test', 'action_test')
+ * @param {object} options - Additional options
+ * @param {function} options.onMessage - Callback called with each message for live updates
+ * @returns {object} Generated script or error, plus conversation log
  */
-async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription) {
+async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription, systemPromptType = 'simple', options = {}) {
+  const { onMessage } = options;
+  const startTime = Date.now();
+  const conversationLog = {
+    systemPromptType,
+    modelName: MODEL_NAME,
+    pageUrl,
+    prompt,
+    messages: [],
+    totalToolCalls: 0
+  };
+
+  // Helper to add message to log and optionally notify callback
+  const logMessage = async (role, content, metadata = {}) => {
+    const message = {
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+      ...metadata
+    };
+    conversationLog.messages.push(message);
+    
+    // Call the live update callback if provided
+    if (onMessage) {
+      try {
+        await onMessage(message, metadata.currentStep || null);
+      } catch (e) {
+        console.error('Gemini: onMessage callback error:', e.message);
+      }
+    }
+  };
+
   if (!genAI) {
-    return { error: 'Gemini API key not configured' };
+    const error = 'Gemini API key not configured';
+    await logMessage('system', error, { type: 'error', currentStep: 'Error' });
+    return { 
+      error, 
+      conversationLog: {
+        ...conversationLog,
+        success: false,
+        error,
+        durationMs: Date.now() - startTime
+      }
+    };
   }
 
   try {
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-3-pro-preview',
+      model: MODEL_NAME,
       tools: geminiTools,
       systemInstruction: systemPrompt
+    });
+
+    // Log system prompt (truncated for storage efficiency)
+    await logMessage('system', systemPrompt.slice(0, 500) + (systemPrompt.length > 500 ? '...' : ''), { 
+      type: 'system_prompt',
+      fullLength: systemPrompt.length,
+      currentStep: 'Initializing AI model...'
     });
 
     // Start conversation with context
@@ -410,9 +687,10 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
     });
 
     // Initial message with the task
-    let response = await chat.sendMessage(
-      `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`
-    );
+    const initialMessage = `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`;
+    await logMessage('user', initialMessage, { type: 'initial_request', currentStep: 'Sending request to AI...' });
+
+    let response = await chat.sendMessage(initialMessage);
 
     // Tool use loop (max 10 iterations to prevent infinite loops)
     for (let i = 0; i < 10; i++) {
@@ -421,30 +699,93 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       
       // Check if there are function calls
       const functionCalls = [];
+      const textParts = [];
       for (const part of content.parts) {
         if (part.functionCall) {
           functionCalls.push(part.functionCall);
         }
+        if (part.text) {
+          textParts.push(part.text);
+        }
+      }
+
+      // Log assistant response
+      if (textParts.length > 0 || functionCalls.length > 0) {
+        const toolNames = functionCalls.map(c => c.name).join(', ');
+        const currentStep = functionCalls.length > 0 
+          ? `AI calling: ${toolNames}` 
+          : 'AI responding...';
+        
+        await logMessage('assistant', {
+          text: textParts.join('\n') || null,
+          functionCalls: functionCalls.length > 0 ? functionCalls.map(c => ({
+            name: c.name,
+            args: c.args
+          })) : null
+        }, { type: 'response', iteration: i + 1, currentStep });
       }
 
       if (functionCalls.length === 0) {
         // No more function calls - check if we got a text response
-        const text = content.parts.find(p => p.text)?.text;
-        return { error: 'No script generated. Model response: ' + (text || 'empty') };
+        const text = textParts.join('\n') || 'empty';
+        const error = 'No script generated. Model response: ' + text;
+        return { 
+          error,
+          conversationLog: {
+            ...conversationLog,
+            success: false,
+            error,
+            durationMs: Date.now() - startTime
+          }
+        };
       }
 
       // Execute function calls
       const functionResponses = [];
       for (const call of functionCalls) {
         console.log(`Gemini tool call: ${call.name}`, call.args);
+        conversationLog.totalToolCalls++;
+        
+        const toolStartTime = Date.now();
         const result = await executeTool(page, call.name, call.args || {});
+        const toolDuration = Date.now() - toolStartTime;
+        
+        // Determine current step description
+        let currentStep = `Executing ${call.name}...`;
+        if (call.name === 'getAccessibilityTree') {
+          currentStep = 'Analyzing page structure...';
+        } else if (call.name === 'querySelector' || call.name === 'getElementDetails') {
+          currentStep = `Finding element: ${call.args?.selector || 'unknown'}`;
+        } else if (call.name === 'getClickableElements') {
+          currentStep = 'Finding interactive elements...';
+        } else if (call.name === 'generateScript' || call.name === 'generateActionSequence') {
+          currentStep = 'Generating script...';
+        }
+        
+        // Log tool execution
+        await logMessage('tool', {
+          name: call.name,
+          args: call.args,
+          result: result.type === 'script' ? { type: 'script', scriptType: result.scriptType } : result,
+          durationMs: toolDuration
+        }, { type: 'tool_call', currentStep });
         
         // Check if this is the final script
         if (result.type === 'script') {
-          return {
+          const successResult = {
             script: result.script,
-            explanation: result.explanation
+            scriptType: result.scriptType || 'eval',
+            explanation: result.explanation,
+            conversationLog: {
+              ...conversationLog,
+              success: true,
+              scriptType: result.scriptType || 'eval',
+              script: result.script,
+              explanation: result.explanation,
+              durationMs: Date.now() - startTime
+            }
           };
+          return successResult;
         }
         
         functionResponses.push({
@@ -455,55 +796,157 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
         });
       }
 
+      // Log function responses being sent back
+      await logMessage('user', {
+        functionResponses: functionResponses.map(fr => ({
+          name: fr.functionResponse.name,
+          // Truncate large responses for log storage
+          response: truncateForLog(fr.functionResponse.response)
+        }))
+      }, { type: 'tool_results', iteration: i + 1, currentStep: 'Processing tool results...' });
+
       // Send function results back to Gemini
       response = await chat.sendMessage(functionResponses);
     }
 
-    return { error: 'Max iterations reached without generating a script' };
+    const error = 'Max iterations reached without generating a script';
+    return { 
+      error,
+      conversationLog: {
+        ...conversationLog,
+        success: false,
+        error,
+        durationMs: Date.now() - startTime
+      }
+    };
 
   } catch (error) {
     console.error('Gemini error:', error);
-    return { error: error.message };
+    await logMessage('system', error.message, { type: 'error', stack: error.stack, currentStep: 'Error' });
+    return { 
+      error: error.message,
+      conversationLog: {
+        ...conversationLog,
+        success: false,
+        error: error.message,
+        durationMs: Date.now() - startTime
+      }
+    };
   }
 }
 
 /**
- * Generate an action script using Gemini with tool use
+ * Truncate large objects for log storage
+ */
+function truncateForLog(obj, maxLength = 1000) {
+  if (typeof obj === 'string') {
+    return obj.length > maxLength ? obj.slice(0, maxLength) + '...' : obj;
+  }
+  if (Array.isArray(obj)) {
+    // For arrays, limit to first 10 items and truncate each
+    return obj.slice(0, 10).map(item => truncateForLog(item, maxLength / 2));
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = truncateForLog(value, maxLength / 2);
+    }
+    return result;
+  }
+  return obj;
+}
+
+/**
+ * Generate an action script using Gemini with tool use (simple eval mode)
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
- * @returns {object} Generated script or error
+ * @param {object} options - Additional options
+ * @param {function} options.onMessage - Callback for live message updates
+ * @returns {object} Generated script or error, plus conversationLog
  */
-async function generateScript(page, prompt, pageUrl) {
+async function generateScript(page, prompt, pageUrl, options = {}) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     SYSTEM_PROMPT, 
-    'User instruction'
+    'User instruction',
+    'simple',
+    options
   );
 }
 
 /**
- * Generate a test script using Gemini with tool use
+ * Generate a test script using Gemini with tool use (simple eval mode)
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language test description
  * @param {string} pageUrl - URL of the page (for context)
- * @returns {object} Generated test script or error
+ * @param {object} options - Additional options
+ * @param {function} options.onMessage - Callback for live message updates
+ * @returns {object} Generated test script or error, plus conversationLog
  */
-async function generateTestScript(page, prompt, pageUrl) {
+async function generateTestScript(page, prompt, pageUrl, options = {}) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     TEST_SYSTEM_PROMPT, 
-    'Test to verify'
+    'Test to verify',
+    'test',
+    options
+  );
+}
+
+/**
+ * Generate an action script that can use either eval or action DSL mode
+ * Gemini decides based on the complexity of the instruction
+ * @param {Page} page - Puppeteer page instance
+ * @param {string} prompt - User's natural language instruction
+ * @param {string} pageUrl - URL of the page (for context)
+ * @param {object} options - Additional options
+ * @param {function} options.onMessage - Callback for live message updates
+ * @returns {object} Generated script with scriptType ('eval' or 'actions'), plus conversationLog
+ */
+async function generateActionScript(page, prompt, pageUrl, options = {}) {
+  return generateScriptWithPrompt(
+    page, 
+    prompt, 
+    pageUrl, 
+    ACTION_SYSTEM_PROMPT, 
+    'User instruction',
+    'action',
+    options
+  );
+}
+
+/**
+ * Generate a test script that can use either eval or action DSL mode
+ * Gemini decides based on the complexity of the test
+ * @param {Page} page - Puppeteer page instance
+ * @param {string} prompt - User's natural language test description
+ * @param {string} pageUrl - URL of the page (for context)
+ * @param {object} options - Additional options
+ * @param {function} options.onMessage - Callback for live message updates
+ * @returns {object} Generated script with scriptType ('eval' or 'actions'), plus conversationLog
+ */
+async function generateActionTestScript(page, prompt, pageUrl, options = {}) {
+  return generateScriptWithPrompt(
+    page, 
+    prompt, 
+    pageUrl, 
+    ACTION_TEST_SYSTEM_PROMPT, 
+    'Test to verify',
+    'action_test',
+    options
   );
 }
 
 module.exports = {
   generateScript,
   generateTestScript,
+  generateActionScript,
+  generateActionTestScript,
   executeTool,
   tools
 };

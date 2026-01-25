@@ -189,14 +189,14 @@ class Scheduler {
     // Fetch instructions and tests for each page and parse viewports
     for (const page of filteredPages) {
       const [instructions] = await db.query(`
-        SELECT id, name, script, is_active
+        SELECT id, name, script, script_type, is_active
         FROM instructions
         WHERE page_id = ? AND is_active = TRUE AND script IS NOT NULL
         ORDER BY execution_order ASC
       `, [page.id]);
       
       const [tests] = await db.query(`
-        SELECT id, name, script, is_active
+        SELECT id, name, script, script_type, is_active, viewports
         FROM tests
         WHERE page_id = ? AND is_active = TRUE AND script IS NOT NULL
         ORDER BY execution_order ASC
@@ -445,6 +445,21 @@ class Scheduler {
           passed++;
         } else {
           failed++;
+          // Log detailed info for failed tests
+          console.error(`Scheduler: Test "${result.name}" (ID: ${result.testId}) FAILED:`);
+          console.error(`  Message: ${result.message}`);
+          if (result.scriptType) {
+            console.error(`  Script type: ${result.scriptType}`);
+          }
+          if (result.actionResults && result.actionResults.length > 0) {
+            const failedSteps = result.actionResults.filter(r => !r.success);
+            if (failedSteps.length > 0) {
+              console.error(`  Failed steps:`);
+              for (const step of failedSteps) {
+                console.error(`    - Step ${step.stepIndex + 1} (${step.label || step.action}): ${step.error || 'unknown error'}`);
+              }
+            }
+          }
         }
       } catch (dbError) {
         console.error(`Scheduler: Failed to save test result for test ${result.testId}:`, dbError.message);

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
+import { ActionSequenceDisplay } from '@/components/ui/action-sequence-display'
 import { Test, api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -131,6 +132,12 @@ export function TestCard({
 
         {/* Status & Viewports */}
         <div className="flex items-center gap-2">
+          {test.script_type === 'actions' && (
+            <Badge variant="outline" className="text-xs">
+              <Icon name="account_tree" size="xs" className="mr-1" />
+              Complex
+            </Badge>
+          )}
           {getViewportsBadges()}
           {getStatusBadge()}
         </div>
@@ -172,11 +179,17 @@ export function TestCard({
       {hasScript && (
         <details className="border-t border-border">
           <summary className="px-4 py-3 text-sm text-muted-foreground cursor-pointer hover:bg-muted/50">
-            View generated test script
+            View generated {test.script_type === 'actions' ? 'action sequence' : 'test script'}
           </summary>
-          <pre className="px-4 pb-4 text-xs font-mono text-primary/80 whitespace-pre-wrap break-words max-h-48 overflow-auto">
-            {test.script}
-          </pre>
+          <div className="px-4 pb-4">
+            {test.script_type === 'actions' ? (
+              <ActionSequenceDisplay script={test.script!} />
+            ) : (
+              <pre className="text-xs font-mono text-primary/80 whitespace-pre-wrap break-words max-h-48 overflow-auto">
+                {test.script}
+              </pre>
+            )}
+          </div>
         </details>
       )}
     </Card>

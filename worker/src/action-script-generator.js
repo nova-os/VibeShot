@@ -1,11 +1,14 @@
-const { generateScript } = require('./gemini');
+const { generateActionScript } = require('./gemini');
+const { validateActionSequence, parseActionSequence, generateValidationReport, getKnownActionTypes } = require('./action-executor');
 const { createConversation, addMessage, completeConversation } = require('./conversation-logger');
 
 /**
- * Script Generator - Orchestrates the generation of page interaction scripts
- * using Puppeteer for page inspection and Gemini for code generation.
+ * Action Script Generator - Orchestrates the generation of page interaction scripts
+ * that can use either eval mode (page.evaluate) or action DSL (Puppeteer API).
+ * 
+ * The AI decides which mode to use based on the complexity of the instruction.
  */
-class ScriptGenerator {
+class ActionScriptGenerator {
   constructor(browserPool) {
     this.browserPool = browserPool;
   }
@@ -17,13 +20,13 @@ class ScriptGenerator {
    * @param {object} options - Additional options
    * @param {number} options.pageId - Page ID for logging context
    * @param {boolean} options.liveUpdates - Enable live conversation updates (default: true)
-   * @returns {object} Generated script and metadata including conversationId
+   * @returns {object} Generated script and metadata including scriptType and conversationId
    */
   async generate(pageUrl, prompt, options = {}) {
     const { viewport = 'desktop', pageId = null, liveUpdates = true } = options;
     
-    console.log(`ScriptGenerator: Generating script for ${pageUrl}`);
-    console.log(`ScriptGenerator: Prompt: "${prompt}"`);
+    console.log(`ActionScriptGenerator: Generating script for ${pageUrl}`);
+    console.log(`ActionScriptGenerator: Prompt: "${prompt}"`);
 
     let browser = null;
     let page = null;
@@ -38,7 +41,7 @@ class ScriptGenerator {
           pageId,
           pageUrl,
           prompt,
-          systemPromptType: 'simple',
+          systemPromptType: 'action',
           modelName: 'gemini-3-pro-preview'
         });
       }
@@ -63,7 +66,7 @@ class ScriptGenerator {
       page.setDefaultTimeout(30000);
 
       // Navigate to the page
-      console.log(`ScriptGenerator: Navigating to ${pageUrl}`);
+      console.log(`ActionScriptGenerator: Navigating to ${pageUrl}`);
       if (liveUpdates && conversationId) {
         await addMessage(conversationId, {
           role: 'system',
@@ -88,12 +91,12 @@ class ScriptGenerator {
           }
         : null;
 
-      // Generate script using Gemini
-      console.log('ScriptGenerator: Calling Gemini for script generation');
-      const result = await generateScript(page, prompt, pageUrl, { onMessage });
+      // Generate script using Gemini (may return eval or actions mode)
+      console.log('ActionScriptGenerator: Calling Gemini for script generation');
+      const result = await generateActionScript(page, prompt, pageUrl, { onMessage });
 
       if (result.error) {
-        console.error('ScriptGenerator: Generation failed:', result.error);
+        console.error('ActionScriptGenerator: Generation failed:', result.error);
         // Complete conversation with failure
         if (liveUpdates && conversationId) {
           await completeConversation(conversationId, {
@@ -105,8 +108,11 @@ class ScriptGenerator {
         return { success: false, error: result.error, conversationId };
       }
 
-      // Validate the generated script by executing it
-      console.log('ScriptGenerator: Validating generated script');
+      const scriptType = result.scriptType || 'eval';
+      console.log(`ActionScriptGenerator: Generated ${scriptType} mode script`);
+
+      // Validate the generated script
+      console.log('ActionScriptGenerator: Validating generated script');
       if (liveUpdates && conversationId) {
         await addMessage(conversationId, {
           role: 'system',
@@ -116,36 +122,40 @@ class ScriptGenerator {
         }, 'Validating script...');
       }
       
-      const validation = await this.validateScript(page, result.script);
+      const validation = await this.validateScript(page, result.script, scriptType);
 
       if (!validation.success) {
-        console.warn('ScriptGenerator: Script validation failed:', validation.error);
-        // Complete conversation (with warning, still success)
+        console.error('ActionScriptGenerator: Script validation failed:', validation.error);
+        const errorMsg = `Generated script failed validation: ${validation.error}`;
+        // Complete conversation with validation failure
         if (liveUpdates && conversationId) {
           await completeConversation(conversationId, {
-            success: true,  // Script was generated, just validation warning
+            success: false,
+            scriptType,
             script: result.script,
             explanation: result.explanation,
-            error: `Validation warning: ${validation.error}`,
+            error: errorMsg,
             durationMs: Date.now() - startTime
           });
         }
-        // Return the script anyway but with a warning
+        // Fail the generation when validation fails
         return {
-          success: true,
-          script: result.script,
+          success: false,
+          error: errorMsg,
+          script: result.script,  // Include the script for debugging
+          scriptType,
           explanation: result.explanation,
-          warning: `Script generated but validation failed: ${validation.error}`,
           conversationId
         };
       }
 
-      console.log('ScriptGenerator: Script generated and validated successfully');
+      console.log('ActionScriptGenerator: Script generated and validated successfully');
       
       // Complete conversation with success
       if (liveUpdates && conversationId) {
         await completeConversation(conversationId, {
           success: true,
+          scriptType,
           script: result.script,
           explanation: result.explanation,
           durationMs: Date.now() - startTime
@@ -155,12 +165,14 @@ class ScriptGenerator {
       return {
         success: true,
         script: result.script,
+        scriptType,
         explanation: result.explanation,
+        warnings: validation.warnings,  // Include any warnings
         conversationId
       };
 
     } catch (error) {
-      console.error('ScriptGenerator: Error:', error.message);
+      console.error('ActionScriptGenerator: Error:', error.message);
       // Complete conversation with error
       if (liveUpdates && conversationId) {
         await completeConversation(conversationId, {
@@ -176,7 +188,7 @@ class ScriptGenerator {
         try {
           await page.close();
         } catch (e) {
-          console.error('ScriptGenerator: Error closing page:', e.message);
+          console.error('ActionScriptGenerator: Error closing page:', e.message);
         }
       }
       if (browser) {
@@ -186,20 +198,55 @@ class ScriptGenerator {
   }
 
   /**
-   * Validate a script by executing it in the page context
+   * Validate a script based on its type
    * @param {Page} page - Puppeteer page instance
-   * @param {string} script - JavaScript code to validate
+   * @param {string} script - Script code or JSON to validate
+   * @param {string} scriptType - 'eval' or 'actions'
    * @returns {object} Validation result
    */
-  async validateScript(page, script) {
+  async validateScript(page, script, scriptType) {
     try {
-      // First, check for syntax errors by trying to parse it
-      new Function(script);
+      if (scriptType === 'actions') {
+        // Generate detailed validation report
+        const report = generateValidationReport(script);
+        
+        if (report.parseError) {
+          return { success: false, error: report.parseError };
+        }
 
-      // Execute the script in page context
-      await page.evaluate(script);
+        // Log validation details
+        console.log(`ActionScriptGenerator: Validation report - ${report.summary.total} steps, ${report.summary.valid} valid, ${report.summary.invalid} invalid`);
+        
+        if (!report.valid) {
+          // Format detailed error message
+          const errorDetails = report.errors.join('\n  - ');
+          console.error(`ActionScriptGenerator: Validation errors:\n  - ${errorDetails}`);
+          
+          // Include hint about known action types if there's an unknown action
+          const hasUnknownAction = report.errors.some(e => e.includes('Unknown action type'));
+          let errorMsg = `Script validation failed with ${report.summary.invalid} error(s):\n${report.errors.join('; ')}`;
+          
+          if (hasUnknownAction) {
+            const knownActions = getKnownActionTypes();
+            errorMsg += `\n\nKnown action types: ${knownActions.join(', ')}`;
+          }
+          
+          return { success: false, error: errorMsg };
+        }
 
-      return { success: true };
+        // Log warnings if any
+        if (report.warnings.length > 0) {
+          console.warn(`ActionScriptGenerator: Validation warnings:`);
+          report.warnings.forEach(w => console.warn(`  - ${w}`));
+        }
+
+        return { success: true, warnings: report.warnings };
+      } else {
+        // Eval mode - check syntax and execute
+        new Function(script);
+        await page.evaluate(script);
+        return { success: true };
+      }
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -210,4 +257,4 @@ class ScriptGenerator {
   }
 }
 
-module.exports = ScriptGenerator;
+module.exports = ActionScriptGenerator;

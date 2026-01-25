@@ -1,7 +1,10 @@
 const express = require('express');
 const ScriptGenerator = require('./script-generator');
 const TestGenerator = require('./test-generator');
+const ActionScriptGenerator = require('./action-script-generator');
+const ActionTestGenerator = require('./action-test-generator');
 const PageDiscovery = require('./page-discovery');
+const { getConversations } = require('./conversation-logger');
 
 /**
  * Worker HTTP API - Provides endpoints for script generation, test generation, and page discovery
@@ -12,6 +15,8 @@ class WorkerApi {
     this.browserPool = browserPool;
     this.scriptGenerator = new ScriptGenerator(browserPool);
     this.testGenerator = new TestGenerator(browserPool);
+    this.actionScriptGenerator = new ActionScriptGenerator(browserPool);
+    this.actionTestGenerator = new ActionTestGenerator(browserPool);
     this.pageDiscovery = new PageDiscovery(browserPool);
     this.app = express();
     this.server = null;
@@ -40,9 +45,9 @@ class WorkerApi {
       });
     });
 
-    // Generate script endpoint (for instructions/actions)
+    // Generate script endpoint (for instructions/actions - simple eval mode)
     this.app.post('/generate-script', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, pageId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -51,19 +56,22 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport, pageId });
         
         if (result.success) {
           res.json({
             success: true,
             script: result.script,
+            scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
-            warning: result.warning
+            warning: result.warning,
+            conversationId: result.conversationId
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error
+            error: result.error,
+            conversationId: result.conversationId
           });
         }
       } catch (error) {
@@ -77,7 +85,7 @@ class WorkerApi {
 
     // Generate test endpoint (for assertions/tests)
     this.app.post('/generate-test', async (req, res) => {
-      const { pageUrl, prompt, viewport } = req.body;
+      const { pageUrl, prompt, viewport, pageId } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -86,24 +94,174 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport });
+        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport, pageId });
         
         if (result.success) {
           res.json({
             success: true,
             script: result.script,
+            scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
             warning: result.warning,
-            validationResult: result.validationResult
+            validationResult: result.validationResult,
+            conversationId: result.conversationId
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error
+            error: result.error,
+            conversationId: result.conversationId
           });
         }
       } catch (error) {
         console.error('WorkerAPI: Generate test error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Generate action script endpoint (supports both eval and action DSL modes)
+    // AI decides which mode to use based on instruction complexity
+    this.app.post('/generate-action-script', async (req, res) => {
+      const { pageUrl, prompt, viewport, pageId } = req.body;
+
+      if (!pageUrl || !prompt) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: pageUrl and prompt' 
+        });
+      }
+
+      try {
+        const result = await this.actionScriptGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        
+        if (result.success) {
+          res.json({
+            success: true,
+            script: result.script,
+            scriptType: result.scriptType || 'eval',
+            explanation: result.explanation,
+            warning: result.warning,
+            conversationId: result.conversationId
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: result.error,
+            conversationId: result.conversationId
+          });
+        }
+      } catch (error) {
+        console.error('WorkerAPI: Generate action script error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Generate action test endpoint (supports both eval and action DSL modes)
+    // AI decides which mode to use based on test complexity
+    this.app.post('/generate-action-test', async (req, res) => {
+      const { pageUrl, prompt, viewport, pageId } = req.body;
+
+      if (!pageUrl || !prompt) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: pageUrl and prompt' 
+        });
+      }
+
+      try {
+        const result = await this.actionTestGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        
+        if (result.success) {
+          res.json({
+            success: true,
+            script: result.script,
+            scriptType: result.scriptType || 'eval',
+            explanation: result.explanation,
+            warning: result.warning,
+            validationResult: result.validationResult,
+            conversationId: result.conversationId
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            error: result.error,
+            conversationId: result.conversationId
+          });
+        }
+      } catch (error) {
+        console.error('WorkerAPI: Generate action test error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Get AI conversations for debugging
+    this.app.get('/conversations', async (req, res) => {
+      const { contextType, contextId, pageId, onlyFailed, limit } = req.query;
+
+      try {
+        const conversations = await getConversations({
+          contextType,
+          contextId: contextId ? parseInt(contextId) : undefined,
+          pageId: pageId ? parseInt(pageId) : undefined,
+          onlyFailed: onlyFailed === 'true',
+          limit: limit ? parseInt(limit) : 50
+        });
+        
+        res.json({
+          success: true,
+          conversations,
+          count: conversations.length
+        });
+      } catch (error) {
+        console.error('WorkerAPI: Get conversations error:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Get single conversation by ID
+    this.app.get('/conversations/:id', async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        const conversations = await getConversations({ limit: 1 });
+        const conversation = conversations.find(c => c.id === parseInt(id));
+        
+        if (!conversation) {
+          // Query specifically for this ID
+          const db = require('./config/database');
+          const [rows] = await db.query('SELECT * FROM ai_conversations WHERE id = ?', [id]);
+          
+          if (rows.length === 0) {
+            return res.status(404).json({
+              success: false,
+              error: 'Conversation not found'
+            });
+          }
+          
+          const conv = rows[0];
+          conv.messages = JSON.parse(conv.messages || '[]');
+          return res.json({
+            success: true,
+            conversation: conv
+          });
+        }
+        
+        res.json({
+          success: true,
+          conversation
+        });
+      } catch (error) {
+        console.error('WorkerAPI: Get conversation error:', error);
         res.status(500).json({
           success: false,
           error: error.message

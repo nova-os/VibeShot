@@ -469,7 +469,7 @@ router.get('/:id/instructions', async (req, res) => {
 // Create instruction for a page
 router.post('/:id/instructions', async (req, res) => {
   try {
-    const { name, prompt, viewport } = req.body;
+    const { name, prompt, viewport, useActions } = req.body;
 
     if (!name || !prompt) {
       return res.status(400).json({ error: 'Name and prompt are required' });
@@ -488,13 +488,16 @@ router.post('/:id/instructions', async (req, res) => {
     const nextOrder = (maxOrder[0].max_order || 0) + 1;
 
     // Call worker to generate script
-    console.log(`Generating script for page ${page.url} with prompt: "${prompt}"`);
+    // Use action DSL endpoint if useActions is true
+    const endpoint = useActions ? '/generate-action-script' : '/generate-script';
+    console.log(`Generating script for page ${page.url} with prompt: "${prompt}" (${useActions ? 'actions' : 'eval'} mode)`);
     
     let script = null;
+    let scriptType = 'eval';
     let generationError = null;
 
     try {
-      const result = await callWorkerApi('/generate-script', {
+      const result = await callWorkerApi(endpoint, {
         pageUrl: page.url,
         prompt,
         viewport: viewport || 'desktop'
@@ -502,6 +505,7 @@ router.post('/:id/instructions', async (req, res) => {
 
       if (result.success) {
         script = result.script;
+        scriptType = result.scriptType || 'eval';
       } else {
         generationError = result.error;
         console.error('Script generation failed:', result.error);
@@ -513,9 +517,9 @@ router.post('/:id/instructions', async (req, res) => {
 
     // Insert instruction (even if script generation failed - user can regenerate)
     const [insertResult] = await db.query(
-      `INSERT INTO instructions (page_id, name, prompt, script, execution_order)
-       VALUES (?, ?, ?, ?, ?)`,
-      [req.params.id, name, prompt, script, nextOrder]
+      `INSERT INTO instructions (page_id, name, prompt, script, script_type, execution_order)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [req.params.id, name, prompt, script, scriptType, nextOrder]
     );
 
     const [instructions] = await db.query(
@@ -572,7 +576,7 @@ router.put('/:id/instructions/reorder', async (req, res) => {
 // Update instruction
 router.put('/:id/instructions/:instructionId', async (req, res) => {
   try {
-    const { name, prompt, is_active, script } = req.body;
+    const { name, prompt, is_active, script, script_type } = req.body;
 
     const page = await verifyPageOwnership(req.params.id, req.user.id);
     if (!page) {
@@ -589,15 +593,38 @@ router.put('/:id/instructions/:instructionId', async (req, res) => {
       return res.status(404).json({ error: 'Instruction not found' });
     }
 
-    await db.query(
-      `UPDATE instructions SET 
-        name = COALESCE(?, name),
-        prompt = COALESCE(?, prompt),
-        is_active = COALESCE(?, is_active),
-        script = COALESCE(?, script)
-       WHERE id = ?`,
-      [name, prompt, is_active, script, req.params.instructionId]
-    );
+    // Build dynamic update query
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    if (prompt !== undefined) {
+      updates.push('prompt = ?');
+      values.push(prompt);
+    }
+    if (is_active !== undefined) {
+      updates.push('is_active = ?');
+      values.push(is_active);
+    }
+    if (script !== undefined) {
+      updates.push('script = ?');
+      values.push(script);
+    }
+    if (script_type !== undefined) {
+      updates.push('script_type = ?');
+      values.push(script_type);
+    }
+
+    if (updates.length > 0) {
+      values.push(req.params.instructionId);
+      await db.query(
+        `UPDATE instructions SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+    }
 
     const [instructions] = await db.query(
       'SELECT * FROM instructions WHERE id = ?',
@@ -640,7 +667,7 @@ router.delete('/:id/instructions/:instructionId', async (req, res) => {
 // Regenerate script for instruction
 router.post('/:id/instructions/:instructionId/regenerate', async (req, res) => {
   try {
-    const { viewport } = req.body;
+    const { viewport, useActions } = req.body;
 
     const page = await verifyPageOwnership(req.params.id, req.user.id);
     if (!page) {
@@ -658,21 +685,29 @@ router.post('/:id/instructions/:instructionId/regenerate', async (req, res) => {
     }
 
     const instruction = instructions[0];
+    
+    // Determine which endpoint to use
+    // If useActions is explicitly set, use that; otherwise preserve current script_type
+    const shouldUseActions = useActions !== undefined 
+      ? useActions 
+      : instruction.script_type === 'actions';
+    const endpoint = shouldUseActions ? '/generate-action-script' : '/generate-script';
 
     // Call worker to regenerate script
-    console.log(`Regenerating script for instruction ${instruction.id}`);
+    console.log(`Regenerating script for instruction ${instruction.id} (${shouldUseActions ? 'actions' : 'eval'} mode)`);
     
     try {
-      const result = await callWorkerApi('/generate-script', {
+      const result = await callWorkerApi(endpoint, {
         pageUrl: page.url,
         prompt: instruction.prompt,
         viewport: viewport || 'desktop'
       });
 
       if (result.success) {
+        const scriptType = result.scriptType || 'eval';
         await db.query(
-          'UPDATE instructions SET script = ? WHERE id = ?',
-          [result.script, req.params.instructionId]
+          'UPDATE instructions SET script = ?, script_type = ? WHERE id = ?',
+          [result.script, scriptType, req.params.instructionId]
         );
 
         const [updated] = await db.query(
@@ -727,7 +762,7 @@ router.get('/:id/tests', async (req, res) => {
 // Create test for a page
 router.post('/:id/tests', async (req, res) => {
   try {
-    const { name, prompt, viewport, viewports } = req.body;
+    const { name, prompt, viewport, viewports, useActions } = req.body;
 
     if (!name || !prompt) {
       return res.status(400).json({ error: 'Name and prompt are required' });
@@ -746,13 +781,16 @@ router.post('/:id/tests', async (req, res) => {
     const nextOrder = (maxOrder[0].max_order || 0) + 1;
 
     // Call worker to generate test script
-    console.log(`Generating test for page ${page.url} with prompt: "${prompt}"`);
+    // Use action DSL endpoint if useActions is true
+    const endpoint = useActions ? '/generate-action-test' : '/generate-test';
+    console.log(`Generating test for page ${page.url} with prompt: "${prompt}" (${useActions ? 'actions' : 'eval'} mode)`);
     
     let script = null;
+    let scriptType = 'eval';
     let generationError = null;
 
     try {
-      const result = await callWorkerApi('/generate-test', {
+      const result = await callWorkerApi(endpoint, {
         pageUrl: page.url,
         prompt,
         viewport: viewport || 'desktop'
@@ -760,6 +798,7 @@ router.post('/:id/tests', async (req, res) => {
 
       if (result.success) {
         script = result.script;
+        scriptType = result.scriptType || 'eval';
       } else {
         generationError = result.error;
         console.error('Test generation failed:', result.error);
@@ -773,9 +812,9 @@ router.post('/:id/tests', async (req, res) => {
     // viewports: null = all viewports, or array like ["desktop", "mobile"]
     const viewportsJson = viewports && viewports.length > 0 ? JSON.stringify(viewports) : null;
     const [insertResult] = await db.query(
-      `INSERT INTO tests (page_id, name, prompt, script, execution_order, viewports)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [req.params.id, name, prompt, script, nextOrder, viewportsJson]
+      `INSERT INTO tests (page_id, name, prompt, script, script_type, execution_order, viewports)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [req.params.id, name, prompt, script, scriptType, nextOrder, viewportsJson]
     );
 
     const [tests] = await db.query(
@@ -836,7 +875,7 @@ router.put('/:id/tests/reorder', async (req, res) => {
 // Update test
 router.put('/:id/tests/:testId', async (req, res) => {
   try {
-    const { name, prompt, is_active, script, viewports } = req.body;
+    const { name, prompt, is_active, script, script_type, viewports } = req.body;
 
     const page = await verifyPageOwnership(req.params.id, req.user.id);
     if (!page) {
@@ -872,6 +911,10 @@ router.put('/:id/tests/:testId', async (req, res) => {
     if (script !== undefined) {
       updates.push('script = ?');
       values.push(script);
+    }
+    if (script_type !== undefined) {
+      updates.push('script_type = ?');
+      values.push(script_type);
     }
     // viewports: null or empty array = all viewports, array = specific viewports
     if (viewports !== undefined) {
@@ -934,7 +977,7 @@ router.delete('/:id/tests/:testId', async (req, res) => {
 // Regenerate script for test
 router.post('/:id/tests/:testId/regenerate', async (req, res) => {
   try {
-    const { viewport } = req.body;
+    const { viewport, useActions } = req.body;
 
     const page = await verifyPageOwnership(req.params.id, req.user.id);
     if (!page) {
@@ -952,21 +995,29 @@ router.post('/:id/tests/:testId/regenerate', async (req, res) => {
     }
 
     const test = tests[0];
+    
+    // Determine which endpoint to use
+    // If useActions is explicitly set, use that; otherwise preserve current script_type
+    const shouldUseActions = useActions !== undefined 
+      ? useActions 
+      : test.script_type === 'actions';
+    const endpoint = shouldUseActions ? '/generate-action-test' : '/generate-test';
 
     // Call worker to regenerate test script
-    console.log(`Regenerating test script for test ${test.id}`);
+    console.log(`Regenerating test script for test ${test.id} (${shouldUseActions ? 'actions' : 'eval'} mode)`);
     
     try {
-      const result = await callWorkerApi('/generate-test', {
+      const result = await callWorkerApi(endpoint, {
         pageUrl: page.url,
         prompt: test.prompt,
         viewport: viewport || 'desktop'
       });
 
       if (result.success) {
+        const scriptType = result.scriptType || 'eval';
         await db.query(
-          'UPDATE tests SET script = ? WHERE id = ?',
-          [result.script, req.params.testId]
+          'UPDATE tests SET script = ?, script_type = ? WHERE id = ?',
+          [result.script, scriptType, req.params.testId]
         );
 
         const [updated] = await db.query(
@@ -974,7 +1025,13 @@ router.post('/:id/tests/:testId/regenerate', async (req, res) => {
           [req.params.testId]
         );
 
-        res.json(updated[0]);
+        const updatedTest = updated[0];
+        // Parse viewports JSON
+        if (updatedTest.viewports && typeof updatedTest.viewports === 'string') {
+          updatedTest.viewports = JSON.parse(updatedTest.viewports);
+        }
+
+        res.json(updatedTest);
       } else {
         res.status(500).json({ error: 'Test generation failed: ' + result.error });
       }

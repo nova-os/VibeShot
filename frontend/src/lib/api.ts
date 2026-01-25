@@ -98,6 +98,7 @@ export interface Instruction {
   name: string
   prompt: string
   script: string | null
+  script_type: 'eval' | 'actions'
   is_active: boolean
   execution_order: number
   last_error: string | null
@@ -114,6 +115,7 @@ export interface Test {
   name: string
   prompt: string
   script: string | null
+  script_type: 'eval' | 'actions'
   is_active: boolean
   execution_order: number
   viewports: string[] | null  // null = all viewports, or array like ["desktop", "mobile"]
@@ -455,7 +457,7 @@ class ApiClient {
 
   async createInstruction(
     pageId: number,
-    data: { name: string; prompt: string; viewport?: string }
+    data: { name: string; prompt: string; viewport?: string; useActions?: boolean }
   ): Promise<Instruction> {
     return this.request<Instruction>(`/pages/${pageId}/instructions`, {
       method: 'POST',
@@ -466,7 +468,7 @@ class ApiClient {
   async updateInstruction(
     pageId: number,
     instructionId: number,
-    data: Partial<Pick<Instruction, 'name' | 'prompt' | 'is_active' | 'script'>>
+    data: Partial<Pick<Instruction, 'name' | 'prompt' | 'is_active' | 'script' | 'script_type'>>
   ): Promise<Instruction> {
     return this.request<Instruction>(`/pages/${pageId}/instructions/${instructionId}`, {
       method: 'PUT',
@@ -483,7 +485,7 @@ class ApiClient {
   async regenerateInstruction(
     pageId: number,
     instructionId: number,
-    options?: { viewport?: string }
+    options?: { viewport?: string; useActions?: boolean }
   ): Promise<Instruction> {
     return this.request<Instruction>(`/pages/${pageId}/instructions/${instructionId}/regenerate`, {
       method: 'POST',
@@ -505,7 +507,7 @@ class ApiClient {
 
   async createTest(
     pageId: number,
-    data: { name: string; prompt: string; viewport?: string; viewports?: string[] }
+    data: { name: string; prompt: string; viewport?: string; viewports?: string[]; useActions?: boolean }
   ): Promise<Test> {
     return this.request<Test>(`/pages/${pageId}/tests`, {
       method: 'POST',
@@ -516,7 +518,7 @@ class ApiClient {
   async updateTest(
     pageId: number,
     testId: number,
-    data: Partial<Pick<Test, 'name' | 'prompt' | 'is_active' | 'script' | 'viewports'>>
+    data: Partial<Pick<Test, 'name' | 'prompt' | 'is_active' | 'script' | 'script_type' | 'viewports'>>
   ): Promise<Test> {
     return this.request<Test>(`/pages/${pageId}/tests/${testId}`, {
       method: 'PUT',
@@ -533,7 +535,7 @@ class ApiClient {
   async regenerateTest(
     pageId: number,
     testId: number,
-    options?: { viewport?: string }
+    options?: { viewport?: string; useActions?: boolean }
   ): Promise<Test> {
     return this.request<Test>(`/pages/${pageId}/tests/${testId}/regenerate`, {
       method: 'POST',

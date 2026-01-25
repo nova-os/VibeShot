@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs').promises;
 const sharp = require('sharp');
+const { executeActionSequence, parseActionSequence, collectAssertionResults } = require('./action-executor');
 
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/app/screenshots';
 const THUMBNAIL_WIDTH = 400;
@@ -119,8 +120,12 @@ async function captureScreenshotsWithProgress(browser, page, onProgress) {
 
 /**
  * Execute AI-generated instructions on the page
+ * Supports two modes:
+ * - 'eval': Runs script in page context using page.evaluate()
+ * - 'actions': Executes structured action sequence using Puppeteer API
+ * 
  * @param {Page} browserPage - Puppeteer page instance
- * @param {Array} instructions - Array of instruction objects with script property
+ * @param {Array} instructions - Array of instruction objects with script and script_type properties
  * @param {string} viewportName - Current viewport name for logging
  * @returns {Array} Array of execution results with success/error status for each instruction
  */
@@ -143,17 +148,44 @@ async function executeInstructions(browserPage, instructions, viewportName) {
     const result = {
       instructionId: instruction.id,
       name: instruction.name,
+      scriptType: instruction.script_type || 'eval',
       success: false,
-      error: null
+      error: null,
+      actionResults: null
     };
     
     try {
-      console.log(`Screenshot: Running instruction "${instruction.name}" (${viewportName})`);
-      await browserPage.evaluate(instruction.script);
+      console.log(`Screenshot: Running instruction "${instruction.name}" [${result.scriptType}] (${viewportName})`);
+      
+      if (instruction.script_type === 'actions') {
+        // Action DSL mode - parse and execute action sequence
+        const parseResult = parseActionSequence(instruction.script);
+        if (!parseResult.success) {
+          throw new Error(`Failed to parse action sequence: ${parseResult.error}`);
+        }
+        
+        const execResult = await executeActionSequence(browserPage, parseResult.sequence, {
+          stopOnError: true,
+          logPrefix: `Screenshot[${instruction.name}]`
+        });
+        
+        result.actionResults = execResult.results;
+        
+        if (!execResult.success) {
+          const failedStep = execResult.results.find(r => !r.success);
+          throw new Error(`Action sequence failed at step ${failedStep?.stepIndex + 1}: ${failedStep?.error}`);
+        }
+        
+        result.success = true;
+      } else {
+        // Eval mode (default) - run script in page context
+        await browserPage.evaluate(instruction.script);
+        result.success = true;
+      }
+      
       // Wait for DOM updates after each instruction
       await sleep(500);
       console.log(`Screenshot: Instruction "${instruction.name}" completed (${viewportName})`);
-      result.success = true;
     } catch (error) {
       const errorMessage = error.message || String(error);
       console.error(`Screenshot: Instruction "${instruction.name}" failed (${viewportName}):`, errorMessage);
@@ -198,8 +230,12 @@ function shouldRunTestOnViewport(test, viewportName) {
 
 /**
  * Execute AI-generated tests on the page
+ * Supports two modes:
+ * - 'eval': Runs script in page context using page.evaluate(), expects { passed, message }
+ * - 'actions': Executes action sequence with assertion steps
+ * 
  * @param {Page} browserPage - Puppeteer page instance
- * @param {Array} tests - Array of test objects with script property
+ * @param {Array} tests - Array of test objects with script and script_type properties
  * @param {string} viewportName - Current viewport name for logging
  * @returns {Array} Array of test results with passed/failed status and messages
  */
@@ -228,23 +264,137 @@ async function executeTests(browserPage, tests, viewportName) {
     const result = {
       testId: test.id,
       name: test.name,
+      scriptType: test.script_type || 'eval',
       passed: false,
       message: null,
-      executionTimeMs: 0
+      executionTimeMs: 0,
+      actionResults: null
     };
     
     try {
-      console.log(`Screenshot: Running test "${test.name}" (${viewportName})`);
-      const testResult = await browserPage.evaluate(test.script);
-      result.executionTimeMs = Date.now() - startTime;
+      console.log(`Screenshot: Running test "${test.name}" [${result.scriptType}] (${viewportName})`);
       
-      // Validate the test result structure
-      if (typeof testResult === 'object' && testResult !== null && typeof testResult.passed === 'boolean') {
-        result.passed = testResult.passed;
-        result.message = testResult.message || (testResult.passed ? 'Test passed' : 'Test failed');
+      if (test.script_type === 'actions') {
+        // Action DSL mode - parse and execute action sequence
+        const parseResult = parseActionSequence(test.script);
+        if (!parseResult.success) {
+          throw new Error(`Failed to parse action sequence: ${parseResult.error}`);
+        }
+        
+        // Log the parsed sequence for debugging
+        console.log(`Screenshot: Test "${test.name}" has ${parseResult.sequence.steps?.length || 0} steps (${viewportName})`);
+        
+        const execResult = await executeActionSequence(browserPage, parseResult.sequence, {
+          stopOnError: false, // Run all assertions even if some fail
+          logPrefix: `Screenshot[${test.name}]`
+        });
+        
+        // Check for validation error (no steps were executed)
+        if (execResult.error && execResult.results.length === 0) {
+          throw new Error(execResult.error);
+        }
+        
+        result.executionTimeMs = Date.now() - startTime;
+        result.actionResults = execResult.results;
+        
+        // Log execution summary for debugging
+        console.log(`Screenshot: Test "${test.name}" execution summary (${viewportName}):`);
+        console.log(`  Total steps: ${execResult.totalSteps}, Completed: ${execResult.completedSteps}`);
+        console.log(`  Overall success: ${execResult.success}`);
+        
+        // Check for ANY failed steps (both assertion and non-assertion)
+        const allFailedSteps = execResult.results.filter(r => !r.success);
+        const failedNonAssertSteps = allFailedSteps.filter(r => !r.action.startsWith('assert'));
+        const failedAssertSteps = allFailedSteps.filter(r => r.action.startsWith('assert'));
+        
+        if (allFailedSteps.length > 0) {
+          console.log(`  Failed steps: ${allFailedSteps.length} (${failedNonAssertSteps.length} action, ${failedAssertSteps.length} assertion)`);
+        }
+        
+        // Check for failed non-assertion steps first (e.g., click failed, navigation timeout)
+        if (failedNonAssertSteps.length > 0) {
+          // Log detailed error info for each failed step
+          for (const failedStep of failedNonAssertSteps) {
+            console.error(`Screenshot: Test "${test.name}" step failed (${viewportName}):`);
+            console.error(`  Step ${failedStep.stepIndex + 1}: ${failedStep.label || failedStep.action}`);
+            console.error(`  Action: ${failedStep.action}`);
+            console.error(`  Error: ${failedStep.error || 'Unknown error'}`);
+          }
+          
+          // Build detailed error message
+          const errorDetails = failedNonAssertSteps.map(s => 
+            `Step ${s.stepIndex + 1} (${s.label || s.action}): ${s.error || 'Unknown error'}`
+          ).join('; ');
+          
+          result.passed = false;
+          result.message = `Action sequence failed: ${errorDetails}`;
+        } else if (failedAssertSteps.length > 0) {
+          // Assertion steps threw errors (different from assertion returning passed=false)
+          for (const failedStep of failedAssertSteps) {
+            console.error(`Screenshot: Test "${test.name}" assertion error (${viewportName}):`);
+            console.error(`  Step ${failedStep.stepIndex + 1}: ${failedStep.label || failedStep.action}`);
+            console.error(`  Error: ${failedStep.error || 'Unknown error'}`);
+          }
+          
+          const errorDetails = failedAssertSteps.map(s => 
+            `${s.label || s.action}: ${s.error || 'Unknown error'}`
+          ).join('; ');
+          
+          result.passed = false;
+          result.message = `Assertion error: ${errorDetails}`;
+        } else {
+          // All steps executed successfully (success=true), now check assertion results
+          const assertionResults = collectAssertionResults(execResult.results);
+          
+          console.log(`  Assertions found: ${assertionResults.totalAssertions}, Passed: ${assertionResults.passed}, Failed: ${assertionResults.failed}`);
+          
+          if (assertionResults.totalAssertions > 0) {
+            // Use assertion results to determine pass/fail
+            result.passed = assertionResults.allPassed;
+            
+            if (assertionResults.allPassed) {
+              result.message = `All ${assertionResults.totalAssertions} assertion(s) passed`;
+            } else {
+              const failedAssertions = assertionResults.results.filter(a => !a.passed);
+              // Log detailed assertion failures
+              for (const failed of failedAssertions) {
+                console.error(`Screenshot: Test "${test.name}" assertion failed (${viewportName}):`);
+                console.error(`  ${failed.label || failed.action}: ${failed.message || 'No message'}`);
+              }
+              result.message = failedAssertions.map(a => `${a.label || a.action}: ${a.message || 'Failed'}`).join('; ');
+            }
+          } else {
+            // No assertions found - this might indicate a problem
+            if (!execResult.success) {
+              // Something failed but we don't know what
+              const anyFailed = execResult.results.find(r => !r.success);
+              const errorMsg = anyFailed 
+                ? `Step ${anyFailed.stepIndex + 1} (${anyFailed.label || anyFailed.action}): ${anyFailed.error || 'Unknown error'}`
+                : 'Unknown failure';
+              console.error(`Screenshot: Test "${test.name}" failed with no assertions (${viewportName}): ${errorMsg}`);
+              result.passed = false;
+              result.message = `Action sequence failed: ${errorMsg}`;
+            } else {
+              // All steps completed but no assertions were found
+              console.warn(`Screenshot: Test "${test.name}" has no assertions (${viewportName})`);
+              result.passed = true;
+              result.message = 'Action sequence completed successfully (no assertions found)';
+            }
+          }
+        }
       } else {
-        result.passed = false;
-        result.message = 'Test script did not return { passed: boolean, message: string }';
+        // Eval mode (default) - run script in page context
+        const testResult = await browserPage.evaluate(test.script);
+        result.executionTimeMs = Date.now() - startTime;
+        
+        // Validate the test result structure
+        if (typeof testResult === 'object' && testResult !== null && typeof testResult.passed === 'boolean') {
+          result.passed = testResult.passed;
+          result.message = testResult.message || (testResult.passed ? 'Test passed' : 'Test failed');
+        } else {
+          result.passed = false;
+          result.message = 'Test script did not return { passed: boolean, message: string }';
+        }
       }
       
       const status = result.passed ? 'PASSED' : 'FAILED';
@@ -252,9 +402,30 @@ async function executeTests(browserPage, tests, viewportName) {
     } catch (error) {
       result.executionTimeMs = Date.now() - startTime;
       const errorMessage = error.message || String(error);
+      const errorStack = error.stack || '';
       result.passed = false;
       result.message = `Script error: ${errorMessage}`;
-      console.error(`Screenshot: Test "${test.name}" ERROR (${viewportName}):`, errorMessage);
+      
+      // Log detailed error information
+      console.error(`Screenshot: Test "${test.name}" ERROR (${viewportName}):`);
+      console.error(`  Script type: ${result.scriptType}`);
+      console.error(`  Error: ${errorMessage}`);
+      if (errorStack && errorStack !== errorMessage) {
+        // Log first few lines of stack trace
+        const stackLines = errorStack.split('\n').slice(0, 5).join('\n');
+        console.error(`  Stack trace:\n${stackLines}`);
+      }
+      
+      // If there were partial action results, log them too
+      if (result.actionResults && result.actionResults.length > 0) {
+        const completedSteps = result.actionResults.length;
+        const failedStep = result.actionResults.find(r => !r.success);
+        console.error(`  Completed ${completedSteps} step(s) before error`);
+        if (failedStep) {
+          console.error(`  Failed at step ${failedStep.stepIndex + 1}: ${failedStep.label || failedStep.action}`);
+        }
+      }
+      
       // Continue with other tests even if one fails
     }
     

@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -46,6 +47,7 @@ export function AddTestDialog({
   const [prompt, setPrompt] = useState('')
   const [viewport, setViewport] = useState('desktop')
   const [runOnViewports, setRunOnViewports] = useState<string[]>([]) // empty = all
+  const [useActions, setUseActions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
   const toggleViewport = (vp: string) => {
@@ -65,13 +67,15 @@ export function AddTestDialog({
         name, 
         prompt, 
         viewport,
-        viewports: runOnViewports.length > 0 ? runOnViewports : undefined
+        viewports: runOnViewports.length > 0 ? runOnViewports : undefined,
+        useActions
       })
       
       if (test.generationError) {
         toast.error(`Test created but script generation failed: ${test.generationError}`)
       } else if (test.script) {
-        toast.success('Test created with AI-generated script')
+        const modeLabel = test.script_type === 'actions' ? 'action sequence' : 'script'
+        toast.success(`Test created with AI-generated ${modeLabel}`)
       } else {
         toast.success('Test created')
       }
@@ -80,6 +84,7 @@ export function AddTestDialog({
       setPrompt('')
       setViewport('desktop')
       setRunOnViewports([])
+      setUseActions(false)
       onOpenChange(false)
       onSuccess()
     } catch (error) {
@@ -166,6 +171,20 @@ export function AddTestDialog({
                   : `Test will only run on: ${runOnViewports.join(', ')}`
                 }
               </p>
+            </div>
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="use-actions">Complex Mode</Label>
+                <p className="text-xs text-muted-foreground">
+                  Enable for tests with page navigation, form interactions, or multi-step verification.
+                </p>
+              </div>
+              <Switch
+                id="use-actions"
+                checked={useActions}
+                onCheckedChange={setUseActions}
+                disabled={isLoading}
+              />
             </div>
           </div>
           <DialogFooter>

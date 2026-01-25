@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -38,6 +39,7 @@ export function AddInstructionDialog({
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [viewport, setViewport] = useState('desktop')
+  const [useActions, setUseActions] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,12 +47,13 @@ export function AddInstructionDialog({
     setIsLoading(true)
 
     try {
-      const instruction = await api.createInstruction(pageId, { name, prompt, viewport })
+      const instruction = await api.createInstruction(pageId, { name, prompt, viewport, useActions })
       
       if (instruction.generationError) {
         toast.error(`Instruction created but script generation failed: ${instruction.generationError}`)
       } else if (instruction.script) {
-        toast.success('Instruction created with AI-generated script')
+        const modeLabel = instruction.script_type === 'actions' ? 'action sequence' : 'script'
+        toast.success(`Instruction created with AI-generated ${modeLabel}`)
       } else {
         toast.success('Instruction created')
       }
@@ -58,6 +61,7 @@ export function AddInstructionDialog({
       setName('')
       setPrompt('')
       setViewport('desktop')
+      setUseActions(false)
       onOpenChange(false)
       onSuccess()
     } catch (error) {
@@ -119,6 +123,20 @@ export function AddInstructionDialog({
               <p className="text-xs text-muted-foreground">
                 The viewport size used when AI analyzes the page to generate the script.
               </p>
+            </div>
+            <div className="flex items-center justify-between py-2">
+              <div className="space-y-0.5">
+                <Label htmlFor="use-actions">Complex Mode</Label>
+                <p className="text-xs text-muted-foreground">
+                  Enable for multi-step workflows with page navigation, form submissions, or waiting for elements.
+                </p>
+              </div>
+              <Switch
+                id="use-actions"
+                checked={useActions}
+                onCheckedChange={setUseActions}
+                disabled={isLoading}
+              />
             </div>
           </div>
           <DialogFooter>
