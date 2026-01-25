@@ -137,175 +137,58 @@ const DEFAULT_TIMEOUTS = {
 };
 
 /**
- * Get list of known action types
- * @returns {string[]} Array of known action type names
- */
-function getKnownActionTypes() {
-  return Object.keys(ACTION_SCHEMAS);
-}
-
-/**
  * Validate an action against its schema
  * @param {Object} action - The action to validate
- * @param {number} stepIndex - Index of the step for error messages
- * @returns {Object} Validation result { valid: boolean, error?: string, warnings?: string[] }
+ * @returns {Object} Validation result { valid: boolean, error?: string }
  */
-function validateAction(action, stepIndex = 0) {
-  const stepLabel = action?.label ? `"${action.label}"` : `Step ${stepIndex + 1}`;
-  const warnings = [];
-  
+function validateAction(action) {
   if (!action || typeof action !== 'object') {
-    return { valid: false, error: `${stepLabel}: Action must be an object` };
+    return { valid: false, error: 'Action must be an object' };
   }
 
   if (!action.action || typeof action.action !== 'string') {
-    return { valid: false, error: `${stepLabel}: Action must have an "action" field` };
+    return { valid: false, error: 'Action must have an "action" field' };
   }
 
   const schema = ACTION_SCHEMAS[action.action];
   if (!schema) {
-    const knownActions = getKnownActionTypes().join(', ');
-    return { 
-      valid: false, 
-      error: `${stepLabel}: Unknown action type "${action.action}". Known actions: ${knownActions}` 
-    };
+    return { valid: false, error: `Unknown action type: ${action.action}` };
   }
 
   // Check required fields
-  const missingFields = [];
   for (const field of schema.required) {
-    if (action[field] === undefined || action[field] === null || action[field] === '') {
-      missingFields.push(field);
+    if (action[field] === undefined) {
+      return { valid: false, error: `Action "${action.action}" requires field: ${field}` };
     }
   }
-  
-  if (missingFields.length > 0) {
-    return { 
-      valid: false, 
-      error: `${stepLabel}: Action "${action.action}" requires field(s): ${missingFields.join(', ')}` 
-    };
-  }
 
-  // Check for unknown fields (warn but don't fail)
-  const knownFields = ['action', 'label', ...schema.required, ...schema.optional];
-  const unknownFields = Object.keys(action).filter(key => !knownFields.includes(key));
-  if (unknownFields.length > 0) {
-    warnings.push(`${stepLabel}: Unknown field(s) for "${action.action}": ${unknownFields.join(', ')}`);
-  }
-
-  // Validate specific field types
-  if (action.timeout !== undefined && (typeof action.timeout !== 'number' || action.timeout <= 0)) {
-    warnings.push(`${stepLabel}: timeout should be a positive number`);
-  }
-  if (action.ms !== undefined && (typeof action.ms !== 'number' || action.ms < 0)) {
-    warnings.push(`${stepLabel}: ms should be a non-negative number`);
-  }
-
-  return { valid: true, warnings: warnings.length > 0 ? warnings : undefined };
+  return { valid: true };
 }
 
 /**
  * Validate a complete action sequence
  * @param {Object} actionSequence - The action sequence to validate
- * @returns {Object} Validation result { valid: boolean, errors: string[], warnings: string[] }
+ * @returns {Object} Validation result { valid: boolean, errors: string[] }
  */
 function validateActionSequence(actionSequence) {
   const errors = [];
-  const warnings = [];
 
   if (!actionSequence || typeof actionSequence !== 'object') {
-    return { valid: false, errors: ['Action sequence must be an object'], warnings: [] };
+    return { valid: false, errors: ['Action sequence must be an object'] };
   }
 
   if (!Array.isArray(actionSequence.steps)) {
-    return { valid: false, errors: ['Action sequence must have a "steps" array'], warnings: [] };
-  }
-
-  if (actionSequence.steps.length === 0) {
-    return { valid: false, errors: ['Action sequence has no steps'], warnings: [] };
+    return { valid: false, errors: ['Action sequence must have a "steps" array'] };
   }
 
   actionSequence.steps.forEach((step, index) => {
-    const result = validateAction(step, index);
+    const result = validateAction(step);
     if (!result.valid) {
-      errors.push(result.error);
-    }
-    if (result.warnings) {
-      warnings.push(...result.warnings);
+      errors.push(`Step ${index + 1}: ${result.error}`);
     }
   });
 
-  // Log validation summary
-  if (errors.length > 0 || warnings.length > 0) {
-    console.log(`ActionExecutor: Validation found ${errors.length} error(s) and ${warnings.length} warning(s)`);
-    errors.forEach(e => console.error(`  ERROR: ${e}`));
-    warnings.forEach(w => console.warn(`  WARNING: ${w}`));
-  }
-
-  return { valid: errors.length === 0, errors, warnings };
-}
-
-/**
- * Generate a detailed validation report for an action sequence
- * @param {Object|string} actionSequenceOrScript - Action sequence object or JSON string
- * @returns {Object} Detailed validation report
- */
-function generateValidationReport(actionSequenceOrScript) {
-  // Parse if string
-  let sequence;
-  if (typeof actionSequenceOrScript === 'string') {
-    try {
-      sequence = JSON.parse(actionSequenceOrScript);
-    } catch (e) {
-      return {
-        valid: false,
-        parseError: `Invalid JSON: ${e.message}`,
-        steps: [],
-        summary: { total: 0, valid: 0, invalid: 0, errors: 1, warnings: 0 }
-      };
-    }
-  } else {
-    sequence = actionSequenceOrScript;
-  }
-
-  if (!sequence || !Array.isArray(sequence.steps)) {
-    return {
-      valid: false,
-      parseError: 'Action sequence must have a "steps" array',
-      steps: [],
-      summary: { total: 0, valid: 0, invalid: 0, errors: 1, warnings: 0 }
-    };
-  }
-
-  const stepReports = sequence.steps.map((step, index) => {
-    const validation = validateAction(step, index);
-    return {
-      index: index + 1,
-      action: step.action || 'unknown',
-      label: step.label || null,
-      valid: validation.valid,
-      error: validation.error || null,
-      warnings: validation.warnings || []
-    };
-  });
-
-  const validSteps = stepReports.filter(s => s.valid);
-  const invalidSteps = stepReports.filter(s => !s.valid);
-  const totalWarnings = stepReports.reduce((sum, s) => sum + s.warnings.length, 0);
-
-  return {
-    valid: invalidSteps.length === 0,
-    steps: stepReports,
-    summary: {
-      total: stepReports.length,
-      valid: validSteps.length,
-      invalid: invalidSteps.length,
-      errors: invalidSteps.length,
-      warnings: totalWarnings
-    },
-    errors: invalidSteps.map(s => s.error),
-    warnings: stepReports.flatMap(s => s.warnings)
-  };
+  return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -775,8 +658,6 @@ module.exports = {
   validateActionSequence,
   parseActionSequence,
   collectAssertionResults,
-  generateValidationReport,
-  getKnownActionTypes,
   ACTION_SCHEMAS,
   DEFAULT_TIMEOUTS
 };

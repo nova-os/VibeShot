@@ -4,7 +4,6 @@ const TestGenerator = require('./test-generator');
 const ActionScriptGenerator = require('./action-script-generator');
 const ActionTestGenerator = require('./action-test-generator');
 const PageDiscovery = require('./page-discovery');
-const { getConversations } = require('./conversation-logger');
 
 /**
  * Worker HTTP API - Provides endpoints for script generation, test generation, and page discovery
@@ -47,7 +46,7 @@ class WorkerApi {
 
     // Generate script endpoint (for instructions/actions - simple eval mode)
     this.app.post('/generate-script', async (req, res) => {
-      const { pageUrl, prompt, viewport, pageId } = req.body;
+      const { pageUrl, prompt, viewport } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -56,7 +55,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        const result = await this.scriptGenerator.generate(pageUrl, prompt, { viewport });
         
         if (result.success) {
           res.json({
@@ -64,14 +63,12 @@ class WorkerApi {
             script: result.script,
             scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
-            warning: result.warning,
-            conversationId: result.conversationId
+            warning: result.warning
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error,
-            conversationId: result.conversationId
+            error: result.error
           });
         }
       } catch (error) {
@@ -85,7 +82,7 @@ class WorkerApi {
 
     // Generate test endpoint (for assertions/tests)
     this.app.post('/generate-test', async (req, res) => {
-      const { pageUrl, prompt, viewport, pageId } = req.body;
+      const { pageUrl, prompt, viewport } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -94,7 +91,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        const result = await this.testGenerator.generate(pageUrl, prompt, { viewport });
         
         if (result.success) {
           res.json({
@@ -103,14 +100,12 @@ class WorkerApi {
             scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
             warning: result.warning,
-            validationResult: result.validationResult,
-            conversationId: result.conversationId
+            validationResult: result.validationResult
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error,
-            conversationId: result.conversationId
+            error: result.error
           });
         }
       } catch (error) {
@@ -125,7 +120,7 @@ class WorkerApi {
     // Generate action script endpoint (supports both eval and action DSL modes)
     // AI decides which mode to use based on instruction complexity
     this.app.post('/generate-action-script', async (req, res) => {
-      const { pageUrl, prompt, viewport, pageId } = req.body;
+      const { pageUrl, prompt, viewport } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -134,7 +129,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.actionScriptGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        const result = await this.actionScriptGenerator.generate(pageUrl, prompt, { viewport });
         
         if (result.success) {
           res.json({
@@ -142,14 +137,12 @@ class WorkerApi {
             script: result.script,
             scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
-            warning: result.warning,
-            conversationId: result.conversationId
+            warning: result.warning
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error,
-            conversationId: result.conversationId
+            error: result.error
           });
         }
       } catch (error) {
@@ -164,7 +157,7 @@ class WorkerApi {
     // Generate action test endpoint (supports both eval and action DSL modes)
     // AI decides which mode to use based on test complexity
     this.app.post('/generate-action-test', async (req, res) => {
-      const { pageUrl, prompt, viewport, pageId } = req.body;
+      const { pageUrl, prompt, viewport } = req.body;
 
       if (!pageUrl || !prompt) {
         return res.status(400).json({ 
@@ -173,7 +166,7 @@ class WorkerApi {
       }
 
       try {
-        const result = await this.actionTestGenerator.generate(pageUrl, prompt, { viewport, pageId });
+        const result = await this.actionTestGenerator.generate(pageUrl, prompt, { viewport });
         
         if (result.success) {
           res.json({
@@ -182,86 +175,16 @@ class WorkerApi {
             scriptType: result.scriptType || 'eval',
             explanation: result.explanation,
             warning: result.warning,
-            validationResult: result.validationResult,
-            conversationId: result.conversationId
+            validationResult: result.validationResult
           });
         } else {
           res.status(500).json({
             success: false,
-            error: result.error,
-            conversationId: result.conversationId
+            error: result.error
           });
         }
       } catch (error) {
         console.error('WorkerAPI: Generate action test error:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    // Get AI conversations for debugging
-    this.app.get('/conversations', async (req, res) => {
-      const { contextType, contextId, pageId, onlyFailed, limit } = req.query;
-
-      try {
-        const conversations = await getConversations({
-          contextType,
-          contextId: contextId ? parseInt(contextId) : undefined,
-          pageId: pageId ? parseInt(pageId) : undefined,
-          onlyFailed: onlyFailed === 'true',
-          limit: limit ? parseInt(limit) : 50
-        });
-        
-        res.json({
-          success: true,
-          conversations,
-          count: conversations.length
-        });
-      } catch (error) {
-        console.error('WorkerAPI: Get conversations error:', error);
-        res.status(500).json({
-          success: false,
-          error: error.message
-        });
-      }
-    });
-
-    // Get single conversation by ID
-    this.app.get('/conversations/:id', async (req, res) => {
-      const { id } = req.params;
-
-      try {
-        const conversations = await getConversations({ limit: 1 });
-        const conversation = conversations.find(c => c.id === parseInt(id));
-        
-        if (!conversation) {
-          // Query specifically for this ID
-          const db = require('./config/database');
-          const [rows] = await db.query('SELECT * FROM ai_conversations WHERE id = ?', [id]);
-          
-          if (rows.length === 0) {
-            return res.status(404).json({
-              success: false,
-              error: 'Conversation not found'
-            });
-          }
-          
-          const conv = rows[0];
-          conv.messages = JSON.parse(conv.messages || '[]');
-          return res.json({
-            success: true,
-            conversation: conv
-          });
-        }
-        
-        res.json({
-          success: true,
-          conversation
-        });
-      } catch (error) {
-        console.error('WorkerAPI: Get conversation error:', error);
         res.status(500).json({
           success: false,
           error: error.message

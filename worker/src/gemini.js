@@ -607,8 +607,6 @@ async function getClickableElements(page) {
   }
 }
 
-const MODEL_NAME = 'gemini-3-pro-preview';
-
 /**
  * Internal function to generate script with specified system prompt
  * @param {Page} page - Puppeteer page instance
@@ -616,69 +614,18 @@ const MODEL_NAME = 'gemini-3-pro-preview';
  * @param {string} pageUrl - URL of the page (for context)
  * @param {string} systemPrompt - The system prompt to use
  * @param {string} taskDescription - Description for the initial message
- * @param {string} systemPromptType - Type identifier for logging ('simple', 'action', 'test', 'action_test')
- * @param {object} options - Additional options
- * @param {function} options.onMessage - Callback called with each message for live updates
- * @returns {object} Generated script or error, plus conversation log
+ * @returns {object} Generated script or error
  */
-async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription, systemPromptType = 'simple', options = {}) {
-  const { onMessage } = options;
-  const startTime = Date.now();
-  const conversationLog = {
-    systemPromptType,
-    modelName: MODEL_NAME,
-    pageUrl,
-    prompt,
-    messages: [],
-    totalToolCalls: 0
-  };
-
-  // Helper to add message to log and optionally notify callback
-  const logMessage = async (role, content, metadata = {}) => {
-    const message = {
-      role,
-      content,
-      timestamp: new Date().toISOString(),
-      ...metadata
-    };
-    conversationLog.messages.push(message);
-    
-    // Call the live update callback if provided
-    if (onMessage) {
-      try {
-        await onMessage(message, metadata.currentStep || null);
-      } catch (e) {
-        console.error('Gemini: onMessage callback error:', e.message);
-      }
-    }
-  };
-
+async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription) {
   if (!genAI) {
-    const error = 'Gemini API key not configured';
-    await logMessage('system', error, { type: 'error', currentStep: 'Error' });
-    return { 
-      error, 
-      conversationLog: {
-        ...conversationLog,
-        success: false,
-        error,
-        durationMs: Date.now() - startTime
-      }
-    };
+    return { error: 'Gemini API key not configured' };
   }
 
   try {
     const model = genAI.getGenerativeModel({ 
-      model: MODEL_NAME,
+      model: 'gemini-3-pro-preview',
       tools: geminiTools,
       systemInstruction: systemPrompt
-    });
-
-    // Log system prompt (truncated for storage efficiency)
-    await logMessage('system', systemPrompt.slice(0, 500) + (systemPrompt.length > 500 ? '...' : ''), { 
-      type: 'system_prompt',
-      fullLength: systemPrompt.length,
-      currentStep: 'Initializing AI model...'
     });
 
     // Start conversation with context
@@ -687,10 +634,9 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
     });
 
     // Initial message with the task
-    const initialMessage = `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`;
-    await logMessage('user', initialMessage, { type: 'initial_request', currentStep: 'Sending request to AI...' });
-
-    let response = await chat.sendMessage(initialMessage);
+    let response = await chat.sendMessage(
+      `Page URL: ${pageUrl}\n\n${taskDescription}: "${prompt}"\n\nPlease explore the page to understand its structure, then generate the JavaScript code to accomplish this task.`
+    );
 
     // Tool use loop (max 10 iterations to prevent infinite loops)
     for (let i = 0; i < 10; i++) {
@@ -699,93 +645,31 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       
       // Check if there are function calls
       const functionCalls = [];
-      const textParts = [];
       for (const part of content.parts) {
         if (part.functionCall) {
           functionCalls.push(part.functionCall);
         }
-        if (part.text) {
-          textParts.push(part.text);
-        }
-      }
-
-      // Log assistant response
-      if (textParts.length > 0 || functionCalls.length > 0) {
-        const toolNames = functionCalls.map(c => c.name).join(', ');
-        const currentStep = functionCalls.length > 0 
-          ? `AI calling: ${toolNames}` 
-          : 'AI responding...';
-        
-        await logMessage('assistant', {
-          text: textParts.join('\n') || null,
-          functionCalls: functionCalls.length > 0 ? functionCalls.map(c => ({
-            name: c.name,
-            args: c.args
-          })) : null
-        }, { type: 'response', iteration: i + 1, currentStep });
       }
 
       if (functionCalls.length === 0) {
         // No more function calls - check if we got a text response
-        const text = textParts.join('\n') || 'empty';
-        const error = 'No script generated. Model response: ' + text;
-        return { 
-          error,
-          conversationLog: {
-            ...conversationLog,
-            success: false,
-            error,
-            durationMs: Date.now() - startTime
-          }
-        };
+        const text = content.parts.find(p => p.text)?.text;
+        return { error: 'No script generated. Model response: ' + (text || 'empty') };
       }
 
       // Execute function calls
       const functionResponses = [];
       for (const call of functionCalls) {
         console.log(`Gemini tool call: ${call.name}`, call.args);
-        conversationLog.totalToolCalls++;
-        
-        const toolStartTime = Date.now();
         const result = await executeTool(page, call.name, call.args || {});
-        const toolDuration = Date.now() - toolStartTime;
-        
-        // Determine current step description
-        let currentStep = `Executing ${call.name}...`;
-        if (call.name === 'getAccessibilityTree') {
-          currentStep = 'Analyzing page structure...';
-        } else if (call.name === 'querySelector' || call.name === 'getElementDetails') {
-          currentStep = `Finding element: ${call.args?.selector || 'unknown'}`;
-        } else if (call.name === 'getClickableElements') {
-          currentStep = 'Finding interactive elements...';
-        } else if (call.name === 'generateScript' || call.name === 'generateActionSequence') {
-          currentStep = 'Generating script...';
-        }
-        
-        // Log tool execution
-        await logMessage('tool', {
-          name: call.name,
-          args: call.args,
-          result: result.type === 'script' ? { type: 'script', scriptType: result.scriptType } : result,
-          durationMs: toolDuration
-        }, { type: 'tool_call', currentStep });
         
         // Check if this is the final script
         if (result.type === 'script') {
-          const successResult = {
+          return {
             script: result.script,
             scriptType: result.scriptType || 'eval',
-            explanation: result.explanation,
-            conversationLog: {
-              ...conversationLog,
-              success: true,
-              scriptType: result.scriptType || 'eval',
-              script: result.script,
-              explanation: result.explanation,
-              durationMs: Date.now() - startTime
-            }
+            explanation: result.explanation
           };
-          return successResult;
         }
         
         functionResponses.push({
@@ -796,64 +680,16 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
         });
       }
 
-      // Log function responses being sent back
-      await logMessage('user', {
-        functionResponses: functionResponses.map(fr => ({
-          name: fr.functionResponse.name,
-          // Truncate large responses for log storage
-          response: truncateForLog(fr.functionResponse.response)
-        }))
-      }, { type: 'tool_results', iteration: i + 1, currentStep: 'Processing tool results...' });
-
       // Send function results back to Gemini
       response = await chat.sendMessage(functionResponses);
     }
 
-    const error = 'Max iterations reached without generating a script';
-    return { 
-      error,
-      conversationLog: {
-        ...conversationLog,
-        success: false,
-        error,
-        durationMs: Date.now() - startTime
-      }
-    };
+    return { error: 'Max iterations reached without generating a script' };
 
   } catch (error) {
     console.error('Gemini error:', error);
-    await logMessage('system', error.message, { type: 'error', stack: error.stack, currentStep: 'Error' });
-    return { 
-      error: error.message,
-      conversationLog: {
-        ...conversationLog,
-        success: false,
-        error: error.message,
-        durationMs: Date.now() - startTime
-      }
-    };
+    return { error: error.message };
   }
-}
-
-/**
- * Truncate large objects for log storage
- */
-function truncateForLog(obj, maxLength = 1000) {
-  if (typeof obj === 'string') {
-    return obj.length > maxLength ? obj.slice(0, maxLength) + '...' : obj;
-  }
-  if (Array.isArray(obj)) {
-    // For arrays, limit to first 10 items and truncate each
-    return obj.slice(0, 10).map(item => truncateForLog(item, maxLength / 2));
-  }
-  if (typeof obj === 'object' && obj !== null) {
-    const result = {};
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = truncateForLog(value, maxLength / 2);
-    }
-    return result;
-  }
-  return obj;
 }
 
 /**
@@ -861,19 +697,15 @@ function truncateForLog(obj, maxLength = 1000) {
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
- * @param {object} options - Additional options
- * @param {function} options.onMessage - Callback for live message updates
- * @returns {object} Generated script or error, plus conversationLog
+ * @returns {object} Generated script or error
  */
-async function generateScript(page, prompt, pageUrl, options = {}) {
+async function generateScript(page, prompt, pageUrl) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     SYSTEM_PROMPT, 
-    'User instruction',
-    'simple',
-    options
+    'User instruction'
   );
 }
 
@@ -882,19 +714,15 @@ async function generateScript(page, prompt, pageUrl, options = {}) {
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language test description
  * @param {string} pageUrl - URL of the page (for context)
- * @param {object} options - Additional options
- * @param {function} options.onMessage - Callback for live message updates
- * @returns {object} Generated test script or error, plus conversationLog
+ * @returns {object} Generated test script or error
  */
-async function generateTestScript(page, prompt, pageUrl, options = {}) {
+async function generateTestScript(page, prompt, pageUrl) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     TEST_SYSTEM_PROMPT, 
-    'Test to verify',
-    'test',
-    options
+    'Test to verify'
   );
 }
 
@@ -904,19 +732,15 @@ async function generateTestScript(page, prompt, pageUrl, options = {}) {
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language instruction
  * @param {string} pageUrl - URL of the page (for context)
- * @param {object} options - Additional options
- * @param {function} options.onMessage - Callback for live message updates
- * @returns {object} Generated script with scriptType ('eval' or 'actions'), plus conversationLog
+ * @returns {object} Generated script with scriptType ('eval' or 'actions')
  */
-async function generateActionScript(page, prompt, pageUrl, options = {}) {
+async function generateActionScript(page, prompt, pageUrl) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     ACTION_SYSTEM_PROMPT, 
-    'User instruction',
-    'action',
-    options
+    'User instruction'
   );
 }
 
@@ -926,19 +750,15 @@ async function generateActionScript(page, prompt, pageUrl, options = {}) {
  * @param {Page} page - Puppeteer page instance
  * @param {string} prompt - User's natural language test description
  * @param {string} pageUrl - URL of the page (for context)
- * @param {object} options - Additional options
- * @param {function} options.onMessage - Callback for live message updates
- * @returns {object} Generated script with scriptType ('eval' or 'actions'), plus conversationLog
+ * @returns {object} Generated script with scriptType ('eval' or 'actions')
  */
-async function generateActionTestScript(page, prompt, pageUrl, options = {}) {
+async function generateActionTestScript(page, prompt, pageUrl) {
   return generateScriptWithPrompt(
     page, 
     prompt, 
     pageUrl, 
     ACTION_TEST_SYSTEM_PROMPT, 
-    'Test to verify',
-    'action_test',
-    options
+    'Test to verify'
   );
 }
 

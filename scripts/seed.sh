@@ -52,12 +52,12 @@ fi
 
 echo "✅ Authenticated"
 
-# Create heise.de site
-echo "🌐 Creating heise.de site..."
+# Create kronimus.de site
+echo "🌐 Creating kronimus.de site..."
 SITE_RESPONSE=$(curl -s -X POST "$API_URL/api/sites" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d '{"name":"heise online","domain":"heise.de"}')
+    -d '{"name":"Kronimus","domain":"kronimus.de"}')
 
 SITE_ID=$(echo "$SITE_RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
 
@@ -76,17 +76,9 @@ echo "📄 Adding pages..."
 curl -s -X POST "$API_URL/api/sites/$SITE_ID/pages" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d '{"name":"Homepage","url":"https://www.heise.de/"}' > /dev/null
+    -d '{"name":"Homepage","url":"https://www.kronimus.de/"}' > /dev/null
 
 echo "   ✅ Homepage added"
-
-# Newsticker
-curl -s -X POST "$API_URL/api/sites/$SITE_ID/pages" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $TOKEN" \
-    -d '{"name":"Newsticker","url":"https://www.heise.de/newsticker/"}' > /dev/null
-
-echo "   ✅ Newsticker added"
 
 echo ""
 echo "✅ Database seeded successfully!"
@@ -95,8 +87,7 @@ echo "   Test account:"
 echo "   📧 Email:    test@example.com"
 echo "   🔑 Password: password123"
 echo ""
-echo "   Site: heise online (heise.de)"
+echo "   Site: Kronimus (kronimus.de)"
 echo "   Pages:"
-echo "     - Homepage: https://www.heise.de/"
-echo "     - Newsticker: https://www.heise.de/newsticker/"
+echo "     - Homepage: https://www.kronimus.de/"
 echo ""

@@ -1,5 +1,17 @@
 const db = require('./config/database');
 
+// Max length for current_step column (VARCHAR(100) in database)
+const MAX_CURRENT_STEP_LENGTH = 100;
+
+/**
+ * Truncate current_step to fit database column
+ */
+function truncateCurrentStep(step) {
+  if (!step) return step;
+  if (step.length <= MAX_CURRENT_STEP_LENGTH) return step;
+  return step.slice(0, MAX_CURRENT_STEP_LENGTH - 3) + '...';
+}
+
 /**
  * Create a new conversation record at the start of generation
  * @param {object} options - Create options
@@ -62,7 +74,7 @@ async function addMessage(conversationId, message, currentStep = null) {
     
     if (currentStep) {
       query += `, current_step = ?`;
-      params.push(currentStep);
+      params.push(truncateCurrentStep(currentStep));
     }
     
     query += ` WHERE id = ?`;
@@ -89,6 +101,7 @@ async function completeConversation(conversationId, result) {
   if (!conversationId) return;
   
   try {
+    const currentStep = result.success ? 'Generation complete' : 'Generation failed';
     await db.query(`
       UPDATE ai_conversations 
       SET status = ?,
@@ -102,7 +115,7 @@ async function completeConversation(conversationId, result) {
       WHERE id = ?
     `, [
       result.success ? 'completed' : 'failed',
-      result.success ? 'Generation complete' : 'Generation failed',
+      truncateCurrentStep(currentStep),
       result.success ? 1 : 0,
       result.scriptType || null,
       result.script || null,
@@ -129,6 +142,7 @@ async function completeConversation(conversationId, result) {
  */
 async function saveConversation({ contextType, contextId = null, pageId = null, conversationLog }) {
   try {
+    const currentStep = conversationLog.success ? 'Generation complete' : 'Generation failed';
     const [result] = await db.query(`
       INSERT INTO ai_conversations (
         context_type,
@@ -157,7 +171,7 @@ async function saveConversation({ contextType, contextId = null, pageId = null, 
       conversationLog.prompt || '',
       conversationLog.systemPromptType || 'unknown',
       conversationLog.success ? 'completed' : 'failed',
-      conversationLog.success ? 'Generation complete' : 'Generation failed',
+      truncateCurrentStep(currentStep),
       conversationLog.success ? 1 : 0,
       conversationLog.scriptType || null,
       conversationLog.script || null,

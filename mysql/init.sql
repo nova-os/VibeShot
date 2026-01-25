@@ -171,38 +171,3 @@ CREATE TABLE IF NOT EXISTS test_results (
     INDEX idx_test_id (test_id),
     INDEX idx_screenshot_id (screenshot_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- AI conversation logs table (stores dialogs with chat models for debugging)
-CREATE TABLE IF NOT EXISTS ai_conversations (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    -- Context: what triggered this conversation
-    context_type ENUM('instruction', 'test') NOT NULL,
-    context_id INT NULL,  -- instruction_id or test_id (NULL if creation failed)
-    page_id INT NULL,
-    -- Request info
-    page_url VARCHAR(2048) NOT NULL,
-    prompt TEXT NOT NULL,
-    system_prompt_type VARCHAR(50) NOT NULL,  -- e.g., 'simple', 'action', 'test', 'action_test'
-    -- Status for live updates
-    status ENUM('in_progress', 'completed', 'failed') NOT NULL DEFAULT 'in_progress',
-    current_step VARCHAR(100) NULL,  -- Current step description for UI
-    -- Result
-    success BOOLEAN NULL,  -- NULL while in_progress
-    script_type VARCHAR(20) NULL,  -- 'eval' or 'actions'
-    generated_script TEXT NULL,
-    explanation TEXT NULL,
-    error_message TEXT NULL,
-    -- The full conversation as JSON array of messages
-    messages JSON NOT NULL,
-    -- Metadata
-    model_name VARCHAR(100) NOT NULL,
-    total_tool_calls INT NOT NULL DEFAULT 0,
-    duration_ms INT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_context (context_type, context_id),
-    INDEX idx_page_id (page_id),
-    INDEX idx_created_at (created_at),
-    INDEX idx_status (status),
-    INDEX idx_success (success)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
