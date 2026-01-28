@@ -1,5 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { ACTION_SCHEMAS } = require('./action-executor');
+const { ACTION_SCHEMAS, validateActionSequence } = require('./action-executor');
 const db = require('./config/database');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -61,7 +61,7 @@ function generateActionDocs() {
   return docs;
 }
 
-// Tool definitions for Gemini
+// Tool definitions for Gemini (exploration tools only - output is via text response)
 const tools = [
   {
     name: 'getAccessibilityTree',
@@ -98,146 +98,12 @@ const tools = [
   {
     name: 'getClickableElements',
     description: 'List all clickable and interactive elements on the page (buttons, links, inputs, elements with click handlers). Returns their selectors, text, and roles.',
-  },
-  {
-    name: 'generateScript',
-    description: 'Generate the final JavaScript code to execute on the page. Call this when you have determined the correct approach. The script will be executed in the browser context.',
-    parameters: {
-      type: 'object',
-      properties: {
-        script: {
-          type: 'string',
-          description: 'The JavaScript code to execute. Use standard DOM APIs. The code runs in the page context with access to document, window, etc.'
-        },
-        explanation: {
-          type: 'string',
-          description: 'Brief explanation of what the script does'
-        }
-      },
-      required: ['script', 'explanation']
-    }
-  },
-  {
-    name: 'generateActionSequence',
-    description: 'Generate a sequence of Puppeteer actions for complex multi-step workflows that involve navigation, waiting, or multiple page interactions. Use this instead of generateScript when the task requires page navigation or complex async operations.',
-    parameters: {
-      type: 'object',
-      properties: {
-        steps: {
-          type: 'array',
-          description: 'Array of action objects. Each action has an "action" field and action-specific parameters.',
-          items: {
-            type: 'object',
-            properties: {
-              action: {
-                type: 'string',
-                description: 'Action type: click, type, clear, select, hover, focus, press, waitForSelector, waitForNavigation, waitForTimeout, waitForFunction, goto, goBack, goForward, reload, scroll, scrollToElement, evaluate, setViewport, assert, assertSelector, assertText, assertUrl, assertTitle'
-              },
-              label: {
-                type: 'string',
-                description: 'Optional human-readable label for this step'
-              },
-              selector: {
-                type: 'string',
-                description: 'CSS selector for element-based actions'
-              },
-              text: {
-                type: 'string',
-                description: 'Text to type or match'
-              },
-              value: {
-                type: 'string',
-                description: 'Value for select actions'
-              },
-              url: {
-                type: 'string',
-                description: 'URL for goto action'
-              },
-              script: {
-                type: 'string',
-                description: 'JavaScript code for evaluate/assert/waitForFunction actions'
-              },
-              timeout: {
-                type: 'number',
-                description: 'Timeout in milliseconds'
-              },
-              ms: {
-                type: 'number',
-                description: 'Milliseconds to wait for waitForTimeout'
-              },
-              key: {
-                type: 'string',
-                description: 'Key to press for press action'
-              },
-              waitUntil: {
-                type: 'string',
-                description: 'Navigation wait condition: load, domcontentloaded, networkidle0, networkidle2'
-              },
-              visible: {
-                type: 'boolean',
-                description: 'Wait for element to be visible'
-              },
-              hidden: {
-                type: 'boolean',
-                description: 'Wait for element to be hidden'
-              },
-              pattern: {
-                type: 'string',
-                description: 'Pattern to match for URL/title assertions'
-              },
-              message: {
-                type: 'string',
-                description: 'Custom failure message for assertions'
-              },
-              exact: {
-                type: 'boolean',
-                description: 'Use exact matching instead of contains'
-              },
-              contains: {
-                type: 'boolean',
-                description: 'Use contains matching (default for text)'
-              },
-              count: {
-                type: 'number',
-                description: 'Expected element count for assertSelector'
-              }
-            },
-            required: ['action']
-          }
-        },
-        explanation: {
-          type: 'string',
-          description: 'Brief explanation of what the action sequence does'
-        }
-      },
-      required: ['steps', 'explanation']
-    }
   }
 ];
 
-// Convert tools to Gemini format
+// Convert tools to Gemini format (exploration tools only)
 const geminiTools = [{
   functionDeclarations: tools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters || { type: 'object', properties: {} }
-  }))
-}];
-
-// Simple mode tools - excludes generateActionSequence to force eval-only output
-const simpleTools = tools.filter(t => t.name !== 'generateActionSequence');
-const simpleGeminiTools = [{
-  functionDeclarations: simpleTools.map(tool => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters || { type: 'object', properties: {} }
-  }))
-}];
-
-// Action mode tools - excludes generateScript to force action sequence output
-const actionTools = tools.filter(t => t.name !== 'generateScript');
-const actionGeminiTools = [{
-  functionDeclarations: actionTools.map(tool => ({
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters || { type: 'object', properties: {} }
@@ -254,12 +120,14 @@ const PROMPT_TOOLS = `You have tools to explore the page:
 const PROMPT_PROCESS_ACTION = `Process:
 1. First, understand what the user wants to do
 2. Use tools to explore the page and find the right elements
-3. Test selectors to make sure they work`;
+3. Test selectors to make sure they work
+4. When ready, output the final result directly (not via a tool call)`;
 
 const PROMPT_PROCESS_TEST = `Process:
 1. First, understand what the user wants to test/verify
 2. Use tools to explore the page and find the relevant elements
-3. Test selectors to make sure they work`;
+3. Test selectors to make sure they work
+4. When ready, output the final result directly (not via a tool call)`;
 
 const PROMPT_SELECTOR_GUIDELINE = `- Use robust selectors (prefer IDs, data attributes, or aria labels over classes)`;
 
@@ -273,16 +141,6 @@ const PROMPT_ACTION_GUIDELINES = `- Add waitForSelector before interacting with 
 - Use appropriate timeouts (default is usually fine)
 - For forms: use type for text inputs, select for dropdowns, click for checkboxes/buttons`;
 
-const PROMPT_LOGIN_EXAMPLE = `{
-  "steps": [
-    { "action": "waitForSelector", "selector": "#username", "label": "Wait for login form" },
-    { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
-    { "action": "type", "selector": "#password", "text": "password123", "label": "Enter password" },
-    { "action": "click", "selector": "#login-button", "label": "Click login" },
-    { "action": "waitForNavigation", "waitUntil": "networkidle2", "label": "Wait for redirect" },
-    { "action": "waitForSelector", "selector": ".dashboard", "label": "Verify dashboard loaded" }
-  ]
-}`;
 
 const PROMPT_ASSERTION_ACTIONS = `Assertion actions for tests:
 - assertSelector: Check if element exists, is visible, or has specific count
@@ -319,20 +177,33 @@ const SYSTEM_PROMPT_ACTIONS_EVAL_MODE = `${ROLE_ACTIONS_EVAL_MODE}
 ${PROMPT_TOOLS}
 
 ${PROMPT_PROCESS_ACTION}
-4. Generate the final script using generateScript
 
 Guidelines for the generated script:
 ${PROMPT_SELECTOR_GUIDELINE}
 - Handle the case where elements might not exist
 - Use click(), focus(), or other standard DOM methods
 - Keep the script simple and focused on the task
+- Do not use :text or :contains in selectors.
 ${PROMPT_EVAL_RESTRICTIONS}
 
-Example script format:
+IMPORTANT: When you are ready to provide the final script, output it using these XML tags:
+
+<script>
+// your JavaScript code here
+</script>
+
+<explanation>Brief explanation of what the script does</explanation>
+
+Example output:
+
+<script>
 const element = document.querySelector('#menu-toggle');
 if (element) {
   element.click();
-}`;
+}
+</script>
+
+<explanation>Clicks the menu toggle button if it exists</explanation>`;
 
 // System prompt for action DSL generation (complex multi-step instructions)
 const SYSTEM_PROMT_ACTIONS_ACTION_MODE = `${ROLE_ACTIONS_ACTION_MODE}
@@ -343,23 +214,46 @@ Available action types:
 ${generateActionDocs()}
 
 ${PROMPT_PROCESS_ACTION}
-4. Generate the action sequence using generateActionSequence
 
 Guidelines for action sequences:
 ${PROMPT_SELECTOR_GUIDELINE}
 ${PROMPT_ACTION_GUIDELINES}
 - Even for simple single actions, use the action sequence format
+- Do not use :text or :contains in selectors.
 
-Example action sequence for a login flow:
-${PROMPT_LOGIN_EXAMPLE}
+IMPORTANT: When you are ready to provide the final action sequence, output it as a JSON object with this exact format:
+\`\`\`json
+{
+  "steps": [...],
+  "explanation": "Brief explanation of what the action sequence does"
+}
+\`\`\`
 
-Example action sequence for a simple click test case:
+Example output for a login flow:
+\`\`\`json
+{
+  "steps": [
+    { "action": "waitForSelector", "selector": "#username", "label": "Wait for login form" },
+    { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
+    { "action": "type", "selector": "#password", "text": "password123", "label": "Enter password" },
+    { "action": "click", "selector": "#login-button", "label": "Click login" },
+    { "action": "waitForNavigation", "waitUntil": "networkidle2", "label": "Wait for redirect" },
+    { "action": "waitForSelector", "selector": ".dashboard", "label": "Verify dashboard loaded" }
+  ],
+  "explanation": "Logs in with test credentials and waits for dashboard"
+}
+\`\`\`
+
+Example output for a simple click:
+\`\`\`json
 {
   "steps": [
     { "action": "waitForSelector", "selector": "#menu-toggle", "label": "Wait for menu button" },
     { "action": "click", "selector": "#menu-toggle", "label": "Click menu toggle" }
-  ]
-}`;
+  ],
+  "explanation": "Clicks the menu toggle button"
+}
+\`\`\``;
 
 // System prompt for action DSL test generation
 const SYSTEM_PROMPT_TESTS_ACTION_MODE = `${ROLE_TESTS_ACTION_MODE}
@@ -372,7 +266,6 @@ ${generateActionDocs()}
 ${PROMPT_ASSERTION_ACTIONS}
 
 ${PROMPT_PROCESS_TEST}
-4. Generate the test action sequence using generateActionSequence
 
 Guidelines for test action sequences:
 - Always use the action sequence format, even for simple single assertions
@@ -381,8 +274,18 @@ Guidelines for test action sequences:
 - Add descriptive labels to all steps for debugging
 - Include meaningful error messages in assertions
 - Use multiple assertions to verify different aspects
+- Do not use :text or :contains in selectors.
 
-Example test action sequence for verifying login:
+IMPORTANT: When you are ready to provide the final test action sequence, output it as a JSON object with this exact format:
+\`\`\`json
+{
+  "steps": [...],
+  "explanation": "Brief explanation of what the test verifies"
+}
+\`\`\`
+
+Example output for verifying login:
+\`\`\`json
 {
   "steps": [
     { "action": "type", "selector": "#username", "text": "testuser", "label": "Enter username" },
@@ -392,16 +295,21 @@ Example test action sequence for verifying login:
     { "action": "assertUrl", "pattern": "/dashboard", "message": "Should redirect to dashboard" },
     { "action": "assertSelector", "selector": ".welcome-message", "visible": true, "message": "Welcome message should be visible" },
     { "action": "assertText", "selector": ".user-name", "text": "testuser", "message": "Username should be displayed" }
-  ]
+  ],
+  "explanation": "Tests the login flow and verifies dashboard redirect"
 }
+\`\`\`
 
-Example test action sequence for a simple element check:
+Example output for a simple element check:
+\`\`\`json
 {
   "steps": [
     { "action": "assertSelector", "selector": "#main-navigation", "visible": true, "label": "Check navigation exists", "message": "Main navigation should be visible" },
     { "action": "assertText", "selector": "h1", "text": "Welcome", "contains": true, "label": "Check page title", "message": "Page should have welcome heading" }
-  ]
-}`;
+  ],
+  "explanation": "Verifies the navigation and welcome heading are present"
+}
+\`\`\``;
 
 // System prompt for test generation (assertions)
 const SYTEM_PROMT_TESTS_EVAL_MODE = `
@@ -410,7 +318,6 @@ ${ROLE_TESTS_EVAL_MODE}
 ${PROMPT_TOOLS}
 
 ${PROMPT_PROCESS_TEST}
-4. Generate the final test script using generateScript
 
 CRITICAL: The generated script MUST return an object with this exact structure:
 { passed: boolean, message: string }
@@ -422,11 +329,20 @@ ${PROMPT_SELECTOR_GUIDELINE}
 - Check for element existence before accessing properties
 - Keep the test focused on a single assertion or related group of assertions
 ${PROMPT_EVAL_RESTRICTIONS}
+- Do not use :text or :contains in selectors.
 - Wrap the entire script in an IIFE that returns the result
 
-Example test scripts:
+IMPORTANT: When you are ready to provide the final test script, output it using these XML tags:
 
-1. Check if element exists:
+<script>
+// your JavaScript test code here
+</script>
+
+<explanation>Brief explanation of what the test verifies</explanation>
+
+Example output for checking if element exists:
+
+<script>
 (function() {
   const element = document.querySelector('#login-button');
   if (!element) {
@@ -434,8 +350,13 @@ Example test scripts:
   }
   return { passed: true, message: 'Login button exists' };
 })();
+</script>
 
-2. Check element text content:
+<explanation>Checks if the login button exists on the page</explanation>
+
+Example output for checking element text content:
+
+<script>
 (function() {
   const header = document.querySelector('h1');
   if (!header) {
@@ -448,32 +369,9 @@ Example test scripts:
   }
   return { passed: false, message: 'Header text mismatch. Expected to contain: "' + expected + '", but found: "' + text + '"' };
 })();
+</script>
 
-3. Check element visibility:
-(function() {
-  const modal = document.querySelector('.modal');
-  if (!modal) {
-    return { passed: false, message: 'Modal element not found' };
-  }
-  const style = window.getComputedStyle(modal);
-  const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-  if (isVisible) {
-    return { passed: true, message: 'Modal is visible' };
-  }
-  return { passed: false, message: 'Modal exists but is not visible (display: ' + style.display + ', visibility: ' + style.visibility + ')' };
-})();
-
-4. Check form field value:
-(function() {
-  const input = document.querySelector('input[name="email"]');
-  if (!input) {
-    return { passed: false, message: 'Email input field not found' };
-  }
-  if (input.value && input.value.length > 0) {
-    return { passed: true, message: 'Email field has value: "' + input.value + '"' };
-  }
-  return { passed: false, message: 'Email field is empty' };
-})();
+<explanation>Verifies that the h1 header contains 'Welcome'</explanation>
 `;
 
 /**
@@ -497,22 +395,88 @@ async function executeTool(page, toolName, args = {}) {
     case 'getClickableElements':
       return await getClickableElements(page);
     
-    case 'generateScript':
-      // This is the final output - return as-is (eval mode)
-      return { type: 'script', scriptType: 'eval', script: args.script, explanation: args.explanation };
-    
-    case 'generateActionSequence':
-      // This is the final output for action DSL mode
-      return { 
-        type: 'script', 
-        scriptType: 'actions', 
-        script: JSON.stringify({ steps: args.steps }, null, 2), 
-        explanation: args.explanation 
-      };
-    
     default:
       return { error: `Unknown tool: ${toolName}` };
   }
+}
+
+/**
+ * Parse the final script output from the model's text response
+ * @param {string} text - The model's text response
+ * @param {string} expectedType - 'eval' for script or 'actions' for action sequences
+ * @returns {object|null} Parsed result or null if not found
+ */
+function parseScriptFromText(text, expectedType) {
+  // For eval mode, try XML tags first: <script>...</script> and <explanation>...</explanation>
+  if (expectedType === 'eval') {
+    const scriptMatch = text.match(/<script>([\s\S]*?)<\/script>/);
+    if (scriptMatch) {
+      const script = scriptMatch[1].trim();
+      const explanationMatch = text.match(/<explanation>([\s\S]*?)<\/explanation>/);
+      const explanation = explanationMatch ? explanationMatch[1].trim() : 'Generated script';
+      return {
+        script,
+        scriptType: 'eval',
+        explanation
+      };
+    }
+  }
+  
+  // For actions mode (or fallback), try JSON in code blocks
+  const jsonBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (jsonBlockMatch) {
+    try {
+      const parsed = JSON.parse(jsonBlockMatch[1].trim());
+      
+      // Check if it's an action sequence (has steps array)
+      if (parsed.steps && Array.isArray(parsed.steps)) {
+        return {
+          script: JSON.stringify({ steps: parsed.steps }, null, 2),
+          scriptType: 'actions',
+          explanation: parsed.explanation || 'Generated action sequence'
+        };
+      }
+      
+      // Fallback: Check if it's an eval script (has script field) - for backwards compatibility
+      if (parsed.script) {
+        return {
+          script: parsed.script,
+          scriptType: 'eval',
+          explanation: parsed.explanation || 'Generated script'
+        };
+      }
+    } catch (e) {
+      // JSON parse failed, continue to try other methods
+    }
+  }
+  
+  // Try to find raw JSON object (without code blocks)
+  const jsonMatch = text.match(/\{[\s\S]*"(?:script|steps)"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      if (parsed.steps && Array.isArray(parsed.steps)) {
+        return {
+          script: JSON.stringify({ steps: parsed.steps }, null, 2),
+          scriptType: 'actions',
+          explanation: parsed.explanation || 'Generated action sequence'
+        };
+      }
+      
+      if (parsed.script) {
+        return {
+          script: parsed.script,
+          scriptType: 'eval',
+          explanation: parsed.explanation || 'Generated script'
+        };
+      }
+    } catch (e) {
+      // JSON parse failed
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -689,11 +653,11 @@ async function getClickableElements(page) {
  * @param {string} pageUrl - URL of the page (for context)
  * @param {string} systemPrompt - The system prompt to use
  * @param {string} taskDescription - Description for the initial message
- * @param {object} toolSet - The Gemini tool set to use (defaults to all tools)
+ * @param {string} expectedType - Expected output type: 'eval' or 'actions'
  * @param {number|null} sessionId - AI session ID for logging (optional)
  * @returns {object} Generated script or error
  */
-async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription, toolSet = geminiTools, sessionId = null) {
+async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, taskDescription, expectedType = 'eval', sessionId = null) {
   if (!genAI) {
     await updateSessionStatus(sessionId, 'failed', 'Gemini API key not configured');
     return { error: 'Gemini API key not configured' };
@@ -704,8 +668,8 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
     await updateSessionStatus(sessionId, 'running');
     
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-3-pro-preview',
-      tools: toolSet,
+      model: 'gemini-2.5-flash',
+      tools: geminiTools,
       systemInstruction: systemPrompt
     });
 
@@ -723,8 +687,12 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
 
     // Initial message with the task
     let response = await chat.sendMessage(initialMessage);
+    
+    // Track validation retry attempts (max 3)
+    let validationRetries = 0;
+    const MAX_VALIDATION_RETRIES = 3;
 
-    // Tool use loop (max 10 iterations to prevent infinite loops)
+    // Tool use loop (max 20 iterations to prevent infinite loops)
     for (let i = 0; i < 20; i++) {
       const candidate = response.response.candidates?.[0];
       if (!candidate) {
@@ -744,22 +712,78 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
       
       // Check if there are function calls
       const functionCalls = [];
+      let textContent = '';
       for (const part of content.parts) {
         if (part.functionCall) {
           functionCalls.push(part.functionCall);
         }
+        if (part.text) {
+          textContent += part.text;
+        }
+      }
+
+      // If there's text content, try to parse it as a final script output
+      if (textContent) {
+        const parsedScript = parseScriptFromText(textContent, expectedType);
+        if (parsedScript) {
+          // Log the assistant response
+          await logAiMessage(sessionId, 'assistant', textContent);
+          
+          // Validate action sequences before returning
+          if (parsedScript.scriptType === 'actions') {
+            try {
+              const actionSequence = JSON.parse(parsedScript.script);
+              const validation = validateActionSequence(actionSequence);
+              
+              if (!validation.valid) {
+                validationRetries++;
+                console.log(`Action sequence validation failed (attempt ${validationRetries}/${MAX_VALIDATION_RETRIES}):`, validation.errors);
+                
+                if (validationRetries >= MAX_VALIDATION_RETRIES) {
+                  const errorMsg = `Action sequence validation failed after ${MAX_VALIDATION_RETRIES} attempts. Errors: ${validation.errors.join('; ')}`;
+                  await updateSessionStatus(sessionId, 'failed', errorMsg);
+                  return { error: errorMsg };
+                }
+                
+                // Send validation errors back to the model
+                const errorMessage = `The action sequence has validation errors. Please fix them and output a corrected version:\n\n${validation.errors.map(e => `- ${e}`).join('\n')}`;
+                await logAiMessage(sessionId, 'user', errorMessage);
+                response = await chat.sendMessage(errorMessage);
+                continue; // Continue the loop to get corrected output
+              }
+            } catch (parseError) {
+              validationRetries++;
+              console.log(`Action sequence JSON parse error (attempt ${validationRetries}/${MAX_VALIDATION_RETRIES}):`, parseError.message);
+              
+              if (validationRetries >= MAX_VALIDATION_RETRIES) {
+                const errorMsg = `Action sequence JSON parsing failed after ${MAX_VALIDATION_RETRIES} attempts: ${parseError.message}`;
+                await updateSessionStatus(sessionId, 'failed', errorMsg);
+                return { error: errorMsg };
+              }
+              
+              // JSON parse error - ask model to fix
+              const errorMessage = `The action sequence JSON is malformed and cannot be parsed: ${parseError.message}\n\nPlease output a valid JSON action sequence.`;
+              await logAiMessage(sessionId, 'user', errorMessage);
+              response = await chat.sendMessage(errorMessage);
+              continue; // Continue the loop to get corrected output
+            }
+          }
+          
+          // Validation passed or not needed (eval mode)
+          await updateSessionStatus(sessionId, 'completed');
+          return parsedScript;
+        }
       }
 
       if (functionCalls.length === 0) {
-        // No more function calls - check if we got a text response
-        const text = content.parts.find(p => p.text)?.text;
-        const errorMsg = 'No script generated. Model response: ' + (text || 'empty');
-        await logAiMessage(sessionId, 'assistant', text || 'No response');
+        // No function calls and no valid script in text - this is an error
+        const errorMsg = 'No script generated. Model response: ' + (textContent || 'empty');
+        await logAiMessage(sessionId, 'assistant', textContent || 'No response');
         await updateSessionStatus(sessionId, 'failed', errorMsg);
         return { error: errorMsg };
       }
 
-      // Execute function calls
+      // Execute function calls (exploration tools only)
       const functionResponses = [];
       for (const call of functionCalls) {
         console.log(`Gemini tool call: ${call.name}`, call.args);
@@ -768,18 +792,6 @@ async function generateScriptWithPrompt(page, prompt, pageUrl, systemPrompt, tas
         await logAiMessage(sessionId, 'tool_call', JSON.stringify(call.args || {}), call.name);
         
         const result = await executeTool(page, call.name, call.args || {});
-        
-        // Check if this is the final script
-        if (result.type === 'script') {
-          // Log the final script generation
-          await logAiMessage(sessionId, 'assistant', `Generated ${result.scriptType} script: ${result.explanation}`);
-          await updateSessionStatus(sessionId, 'completed');
-          return {
-            script: result.script,
-            scriptType: result.scriptType || 'eval',
-            explanation: result.explanation
-          };
-        }
         
         // Log the tool result
         await logAiMessage(sessionId, 'tool_result', JSON.stringify(result), call.name);
@@ -822,7 +834,7 @@ async function generateScript(page, prompt, pageUrl, sessionId = null) {
     pageUrl, 
     SYSTEM_PROMPT_ACTIONS_EVAL_MODE, 
     'User instruction',
-    simpleGeminiTools,  // Simple mode - only generateScript tool available
+    'eval',  // Expect eval script output
     sessionId
   );
 }
@@ -842,7 +854,7 @@ async function generateTestScript(page, prompt, pageUrl, sessionId = null) {
     pageUrl, 
     SYTEM_PROMT_TESTS_EVAL_MODE, 
     'Test to verify',
-    simpleGeminiTools,  // Simple mode - only generateScript tool available
+    'eval',  // Expect eval script output
     sessionId
   );
 }
@@ -862,7 +874,7 @@ async function generateActionScript(page, prompt, pageUrl, sessionId = null) {
     pageUrl, 
     SYSTEM_PROMT_ACTIONS_ACTION_MODE, 
     'User instruction',
-    actionGeminiTools,  // Action mode - only generateActionSequence available
+    'actions',  // Expect action sequence output
     sessionId
   );
 }
@@ -882,7 +894,7 @@ async function generateActionTestScript(page, prompt, pageUrl, sessionId = null)
     pageUrl, 
     SYSTEM_PROMPT_TESTS_ACTION_MODE, 
     'Test to verify',
-    actionGeminiTools,  // Action mode - only generateActionSequence available
+    'actions',  // Expect action sequence output
     sessionId
   );
 }
