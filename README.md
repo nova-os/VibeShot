@@ -22,7 +22,7 @@ A web application for automated website screenshot monitoring. Track visual chan
 │                    Docker Compose                           │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │   MySQL     │  │  API Server │  │  Screenshot Worker  │ │
+│  │  MariaDB    │  │  API Server │  │  Screenshot Worker  │ │
 │  │  Database   │  │  (Express)  │  │   (Puppeteer x4)    │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 │         │                │                    │             │
@@ -54,10 +54,10 @@ A web application for automated website screenshot monitoring. Track visual chan
 
 3. Edit `.env` and set secure values:
    ```env
-   MYSQL_ROOT_PASSWORD=your-secure-root-password
-   MYSQL_DATABASE=vibeshot
-   MYSQL_USER=vibeshot
-   MYSQL_PASSWORD=your-secure-password
+   MARIADB_ROOT_PASSWORD=your-secure-root-password
+   MARIADB_DATABASE=vibeshot
+   MARIADB_USER=vibeshot
+   MARIADB_PASSWORD=your-secure-password
    JWT_SECRET=your-super-secret-jwt-key-change-this
    ```
 
@@ -98,10 +98,10 @@ The seed script creates a test site (heise.de) with two pages for testing.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MYSQL_ROOT_PASSWORD` | MySQL root password | - |
-| `MYSQL_DATABASE` | Database name | vibeshot |
-| `MYSQL_USER` | Database user | vibeshot |
-| `MYSQL_PASSWORD` | Database password | - |
+| `MARIADB_ROOT_PASSWORD` | MariaDB root password | - |
+| `MARIADB_DATABASE` | Database name | vibeshot |
+| `MARIADB_USER` | Database user | vibeshot |
+| `MARIADB_PASSWORD` | Database password | - |
 | `JWT_SECRET` | Secret for JWT tokens | - |
 | `BROWSER_POOL_SIZE` | Number of parallel browsers | 4 |
 | `VIEWPORT_MOBILE` | Mobile viewport width | 375 |
@@ -134,15 +134,15 @@ When adding a page, you can configure the capture interval in minutes:
    cd ../worker && npm install
    ```
 
-2. Start MySQL locally or via Docker:
+2. Start MariaDB locally or via Docker:
    ```bash
-   docker run -d --name vibeshot-mysql \
-     -e MYSQL_ROOT_PASSWORD=root \
-     -e MYSQL_DATABASE=vibeshot \
-     -e MYSQL_USER=vibeshot \
-     -e MYSQL_PASSWORD=password \
+   docker run -d --name vibeshot-mariadb \
+     -e MARIADB_ROOT_PASSWORD=root \
+     -e MARIADB_DATABASE=vibeshot \
+     -e MARIADB_USER=vibeshot \
+     -e MARIADB_PASSWORD=password \
      -p 3306:3306 \
-     mysql:8.0
+     mariadb:12.1.2
    ```
 
 3. Initialize database:
@@ -221,8 +221,8 @@ vibeshot/
 - Verify the page is set to "active"
 
 ### Database connection errors
-- Wait for MySQL to fully initialize (may take 30-60 seconds)
-- Check MySQL logs: `docker-compose logs mysql`
+- Wait for MariaDB to fully initialize (may take 30-60 seconds)
+- Check MariaDB logs: `docker-compose logs mysql`
 
 ### Out of disk space
 - Screenshots are stored in a Docker volume

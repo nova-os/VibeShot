@@ -1,23 +1,18 @@
 services:
   mysql:
-    image: mysql:8.0
+    image: mariadb:12.1.2
     container_name: vibeshot-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DATABASE}
+      MARIADB_USER: ${MARIADB_USER}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
     ports:
       - "${HTTP_INTERFACE:-127.0.0.1}:${HTTP_PORT:-3306}:3306"
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   phpmyadmin:
     image: phpmyadmin:latest
@@ -44,9 +39,9 @@ services:
       NODE_ENV: development
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USER: ${MYSQL_USER}
-      DB_PASSWORD: ${MYSQL_PASSWORD}
-      DB_NAME: ${MYSQL_DATABASE}
+      DB_USER: ${MARIADB_USER}
+      DB_PASSWORD: ${MARIADB_PASSWORD}
+      DB_NAME: ${MARIADB_DATABASE}
       JWT_SECRET: ${JWT_SECRET}
       WORKER_API_URL: http://worker:3001
     volumes:
@@ -54,8 +49,7 @@ services:
       - ./api/public:/app/public
       - ./data/screenshots:/app/screenshots
     depends_on:
-      mysql:
-        condition: service_healthy
+      - mysql
 
   worker:
     build:
@@ -69,9 +63,9 @@ services:
       NODE_ENV: development
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_USER: ${MYSQL_USER}
-      DB_PASSWORD: ${MYSQL_PASSWORD}
-      DB_NAME: ${MYSQL_DATABASE}
+      DB_USER: ${MARIADB_USER}
+      DB_PASSWORD: ${MARIADB_PASSWORD}
+      DB_NAME: ${MARIADB_DATABASE}
       BROWSER_POOL_SIZE: 4
       WORKER_API_PORT: 3001
       GEMINI_API_KEY: ${GEMINI_API_KEY}
@@ -83,5 +77,4 @@ services:
       - ./worker/src:/app/src
       - ./data/screenshots:/app/screenshots
     depends_on:
-      mysql:
-        condition: service_healthy
+      - mysql
