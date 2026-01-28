@@ -9,7 +9,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3306:3306"
+      - "${HTTP_INTERFACE:-127.0.0.1}:${HTTP_PORT:-3306}:3306"
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -24,7 +24,7 @@ services:
     container_name: vibeshot-phpmyadmin
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "${HTTP_INTERFACE:-127.0.0.1}:${HTTP_PORT:-8080}:80"
     environment:
       PMA_HOST: mysql
       PMA_PORT: 3306
@@ -39,7 +39,7 @@ services:
     container_name: vibeshot-api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${HTTP_INTERFACE:-127.0.0.1}:${HTTP_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
       DB_HOST: mysql
@@ -63,6 +63,8 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vibeshot-worker
     restart: unless-stopped
+    ports:
+      - "${HTTP_INTERFACE:-127.0.0.1}:${HTTP_PORT:-3001}:3001"
     environment:
       NODE_ENV: development
       DB_HOST: mysql
