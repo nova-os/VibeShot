@@ -29,6 +29,8 @@ export interface Page {
   created_at: string
   screenshot_count?: number
   latest_screenshot?: string | null
+  // Effective interval after cascade (page → site → user → system default)
+  effective_interval_minutes?: number
   // Error counts from the latest screenshot group
   latest_js_error_count?: number
   latest_network_error_count?: number

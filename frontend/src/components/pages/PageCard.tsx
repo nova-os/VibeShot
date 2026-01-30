@@ -4,7 +4,6 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Icon } from '@/components/ui/icon'
 import { cn, formatInterval, formatDate } from '@/lib/utils'
-import { DEFAULT_INTERVAL_MINUTES } from '@/lib/constants'
 import type { Page, CaptureJob } from '@/lib/api'
 
 interface PageCardProps {
@@ -83,7 +82,7 @@ export function PageCard({ page, siteId, selectMode = false, isSelected = false,
             </Badge>
           ) : (
             <>
-              <span>Every {formatInterval(page.interval_minutes ?? DEFAULT_INTERVAL_MINUTES)}</span>
+              <span>Every {page.effective_interval_minutes ? formatInterval(page.effective_interval_minutes) : 'N/A'}</span>
               <Badge variant="secondary">{page.screenshot_count || 0} screenshots</Badge>
               {page.latest_screenshot && (
                 <span className="hidden md:inline">Last: {formatDate(page.latest_screenshot)}</span>

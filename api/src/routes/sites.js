@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { DEFAULT_INTERVAL_MINUTES } = require('../config/constants');
 
 const router = express.Router();
 
@@ -181,34 +182,39 @@ router.get('/:id/pages', async (req, res) => {
       return res.status(404).json({ error: 'Site not found' });
     }
 
-    // Query pages with screenshot count, latest screenshot, and error counts for latest group
+    const site = sites[0];
+    
+    // Query pages with screenshot count, latest screenshot, error counts, and effective interval
     const [pages] = await db.query(
       `SELECT p.*, 
         (SELECT COUNT(*) FROM screenshots WHERE page_id = p.id) as screenshot_count,
         (SELECT created_at FROM screenshots WHERE page_id = p.id ORDER BY created_at DESC LIMIT 1) as latest_screenshot,
         COALESCE(latest_errors.js_error_count, 0) as latest_js_error_count,
-        COALESCE(latest_errors.network_error_count, 0) as latest_network_error_count
+        COALESCE(latest_errors.network_error_count, 0) as latest_network_error_count,
+        COALESCE(p.interval_minutes, s.interval_minutes, us.default_interval_minutes, ?) as effective_interval_minutes
        FROM pages p 
+       JOIN sites s ON p.site_id = s.id
+       LEFT JOIN user_settings us ON s.user_id = us.user_id
        LEFT JOIN (
          -- Get error counts for the latest screenshot group (screenshots within the same minute)
          SELECT 
-           s.page_id,
+           sc.page_id,
            SUM(CASE WHEN se.error_type = 'js' THEN 1 ELSE 0 END) as js_error_count,
            SUM(CASE WHEN se.error_type = 'network' THEN 1 ELSE 0 END) as network_error_count
-         FROM screenshots s
+         FROM screenshots sc
          INNER JOIN (
            -- Find the latest timestamp for each page
            SELECT page_id, MAX(created_at) as max_created_at
            FROM screenshots
            GROUP BY page_id
-         ) latest ON s.page_id = latest.page_id 
-           AND s.created_at >= DATE_SUB(latest.max_created_at, INTERVAL 1 MINUTE)
-         LEFT JOIN screenshot_errors se ON s.id = se.screenshot_id
-         GROUP BY s.page_id
+         ) latest ON sc.page_id = latest.page_id 
+           AND sc.created_at >= DATE_SUB(latest.max_created_at, INTERVAL 1 MINUTE)
+         LEFT JOIN screenshot_errors se ON sc.id = se.screenshot_id
+         GROUP BY sc.page_id
        ) latest_errors ON p.id = latest_errors.page_id
        WHERE p.site_id = ? 
        ORDER BY p.created_at DESC`,
-      [req.params.id]
+      [DEFAULT_INTERVAL_MINUTES, req.params.id]
     );
 
     // Parse viewports JSON for each page
