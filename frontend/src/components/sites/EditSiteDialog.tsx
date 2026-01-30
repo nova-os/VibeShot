@@ -13,7 +13,8 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Icon } from '@/components/ui/icon'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
-import { api, Site, UserSettings } from '@/lib/api'
+import { Site } from '@/lib/api'
+import { useSettings, useUpdateSite } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 import { DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS } from '@/lib/constants'
 
@@ -21,20 +22,19 @@ interface EditSiteDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   site: Site
-  onSuccess: (updatedSite: Site) => void
 }
 
-export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSiteDialogProps) {
+export function EditSiteDialog({ open, onOpenChange, site }: EditSiteDialogProps) {
   const [name, setName] = useState(site.name)
   const [domain, setDomain] = useState(site.domain)
   const [useCustomSettings, setUseCustomSettings] = useState(false)
   const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL_MINUTES)
   const [viewports, setViewports] = useState<number[]>(DEFAULT_VIEWPORTS)
-  const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+  
+  const { data: userSettings, isLoading: isLoadingSettings } = useSettings()
+  const updateSite = useUpdateSite()
 
-  // Load user settings and initialize form when dialog opens
+  // Initialize form when dialog opens
   useEffect(() => {
     if (open) {
       setName(site.name)
@@ -43,39 +43,29 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
       // Check if site has custom settings
       const hasCustomSettings = site.interval_minutes !== null || site.viewports !== null
       setUseCustomSettings(hasCustomSettings)
-      
-      // Load user settings to show as reference/defaults
-      loadUserSettings()
     }
   }, [open, site])
 
-  const loadUserSettings = async () => {
-    setIsLoadingSettings(true)
-    try {
-      const settings = await api.getSettings()
-      setUserSettings(settings)
-      
-      // Initialize with site's custom values or user defaults
+  // Initialize with site's custom values or user defaults when settings load
+  useEffect(() => {
+    if (userSettings) {
       if (site.interval_minutes !== null) {
         setIntervalMinutes(site.interval_minutes)
       } else {
-        setIntervalMinutes(settings.default_interval_minutes)
+        setIntervalMinutes(userSettings.default_interval_minutes)
       }
       
       if (site.viewports !== null) {
         setViewports(site.viewports)
       } else {
-        setViewports(settings.default_viewports)
+        setViewports(userSettings.default_viewports)
       }
-    } catch (error) {
-      console.error('Failed to load user settings:', error)
+    } else {
       // Use system defaults if we can't load user settings
       setIntervalMinutes(site.interval_minutes ?? DEFAULT_INTERVAL_MINUTES)
       setViewports(site.viewports ?? DEFAULT_VIEWPORTS)
-    } finally {
-      setIsLoadingSettings(false)
     }
-  }
+  }, [userSettings, site])
 
   const handleCaptureSettingsChange = (settings: { intervalMinutes: number; viewports: number[] }) => {
     setIntervalMinutes(settings.intervalMinutes)
@@ -84,25 +74,28 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      const updatedSite = await api.updateSite(site.id, {
-        name,
-        domain,
-        // Set to null if not using custom settings (inherit from user defaults)
-        interval_minutes: useCustomSettings ? intervalMinutes : null,
-        viewports: useCustomSettings ? viewports : null,
-      })
-      
-      toast.success('Site updated successfully')
-      onSuccess(updatedSite)
-      onOpenChange(false)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update site')
-    } finally {
-      setIsLoading(false)
-    }
+    updateSite.mutate(
+      {
+        id: site.id,
+        data: {
+          name,
+          domain,
+          // Set to null if not using custom settings (inherit from user defaults)
+          interval_minutes: useCustomSettings ? intervalMinutes : null,
+          viewports: useCustomSettings ? viewports : null,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Site updated successfully')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update site')
+        },
+      }
+    )
   }
 
   return (
@@ -126,7 +119,7 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
-                  disabled={isLoading}
+                  disabled={updateSite.isPending}
                 />
               </div>
               <div className="space-y-2">
@@ -137,7 +130,7 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
                   required
-                  disabled={isLoading}
+                  disabled={updateSite.isPending}
                 />
               </div>
             </div>
@@ -157,7 +150,7 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
                 id="custom-settings-toggle"
                 checked={useCustomSettings}
                 onCheckedChange={setUseCustomSettings}
-                disabled={isLoading || isLoadingSettings}
+                disabled={updateSite.isPending || isLoadingSettings}
               />
             </div>
 
@@ -173,7 +166,7 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
                     intervalMinutes={intervalMinutes}
                     viewports={viewports}
                     onChange={handleCaptureSettingsChange}
-                    disabled={isLoading}
+                    disabled={updateSite.isPending}
                   />
                 )}
               </>
@@ -199,11 +192,11 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={updateSite.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || isLoadingSettings}>
-              {isLoading ? (
+            <Button type="submit" disabled={updateSite.isPending || isLoadingSettings}>
+              {updateSite.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Saving...

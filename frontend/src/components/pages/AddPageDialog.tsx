@@ -11,23 +11,24 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Icon } from '@/components/ui/icon'
-import { api } from '@/lib/api'
+import { useCreatePage, useFetchPageTitle } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface AddPageDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   siteId: number
-  onSuccess: () => void
 }
 
-export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPageDialogProps) {
+export function AddPageDialog({ open, onOpenChange, siteId }: AddPageDialogProps) {
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
   const [isResolvingTitle, setIsResolvingTitle] = useState(false)
   const [nameWasManuallySet, setNameWasManuallySet] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  
+  const createPage = useCreatePage()
+  const fetchPageTitle = useFetchPageTitle()
 
   // Reset state when dialog opens/closes
   useEffect(() => {
@@ -69,22 +70,23 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
       setIsResolvingTitle(true)
       abortControllerRef.current = new AbortController()
 
-      try {
-        const { title } = await api.fetchPageTitle(url)
-        // Only update if user hasn't manually changed the name
-        if (!nameWasManuallySet) {
-          setName(title)
-        }
-      } catch {
-        // Silently ignore errors - user can still enter name manually
-      } finally {
-        setIsResolvingTitle(false)
-      }
+      fetchPageTitle.mutate(url, {
+        onSuccess: ({ title }) => {
+          // Only update if user hasn't manually changed the name
+          if (!nameWasManuallySet) {
+            setName(title)
+          }
+        },
+        onSettled: () => {
+          setIsResolvingTitle(false)
+        },
+      })
     }, 500) // 500ms debounce
 
     return () => {
       clearTimeout(timeoutId)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, nameWasManuallySet])
 
   const handleNameChange = (value: string) => {
@@ -99,24 +101,28 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      await api.createPage(siteId, {
-        name: name.trim() || undefined,
-        url,
-      })
-      toast.success('Page added successfully')
-      setName('')
-      setUrl('')
-      setNameWasManuallySet(false)
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create page')
-    } finally {
-      setIsLoading(false)
-    }
+    createPage.mutate(
+      {
+        siteId,
+        data: {
+          name: name.trim() || undefined,
+          url,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Page added successfully')
+          setName('')
+          setUrl('')
+          setNameWasManuallySet(false)
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to create page')
+        },
+      }
+    )
   }
 
   return (
@@ -139,7 +145,7 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={createPage.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -150,7 +156,7 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
                   placeholder={isResolvingTitle ? 'Detecting page title...' : 'Enter name or auto-detect from URL'}
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  disabled={isLoading}
+                  disabled={createPage.isPending}
                   className={isResolvingTitle ? 'pr-8' : ''}
                 />
                 {isResolvingTitle && (
@@ -165,11 +171,11 @@ export function AddPageDialog({ open, onOpenChange, siteId, onSuccess }: AddPage
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={createPage.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || isResolvingTitle}>
-              {isLoading ? (
+            <Button type="submit" disabled={createPage.isPending || isResolvingTitle}>
+              {createPage.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Adding...

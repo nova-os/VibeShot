@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -9,7 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { api, Instruction } from '@/lib/api'
+import { Instruction } from '@/lib/api'
+import { useDeleteInstruction } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DeleteInstructionDialogProps {
@@ -17,7 +17,6 @@ interface DeleteInstructionDialogProps {
   onOpenChange: (open: boolean) => void
   instruction: Instruction
   pageId: number
-  onSuccess: () => void
 }
 
 export function DeleteInstructionDialog({
@@ -25,23 +24,22 @@ export function DeleteInstructionDialog({
   onOpenChange,
   instruction,
   pageId,
-  onSuccess,
 }: DeleteInstructionDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+  const deleteInstruction = useDeleteInstruction()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      await api.deleteInstruction(pageId, instruction.id)
-      toast.success('Instruction deleted')
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete instruction')
-    } finally {
-      setIsLoading(false)
-    }
+    deleteInstruction.mutate(
+      { pageId, instructionId: instruction.id },
+      {
+        onSuccess: () => {
+          toast.success('Instruction deleted')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to delete instruction')
+        },
+      }
+    )
   }
 
   return (
@@ -54,11 +52,11 @@ export function DeleteInstructionDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deleteInstruction.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleteInstruction.isPending}>
+            {deleteInstruction.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...

@@ -13,29 +13,29 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Icon } from '@/components/ui/icon'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { api, DiscoveredPage, Site } from '@/lib/api'
+import { DiscoveredPage, Site } from '@/lib/api'
+import { useDiscoverPages, useBulkCreatePages } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DiscoverPagesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   site: Site
-  onSuccess: () => void
 }
 
 export function DiscoverPagesDialog({
   open,
   onOpenChange,
   site,
-  onSuccess,
 }: DiscoverPagesDialogProps) {
-  const [isDiscovering, setIsDiscovering] = useState(false)
-  const [isAdding, setIsAdding] = useState(false)
   const [maxPages, setMaxPages] = useState(10)
   const [discoveredPages, setDiscoveredPages] = useState<DiscoveredPage[]>([])
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set())
   const [totalFound, setTotalFound] = useState(0)
   const [error, setError] = useState<string | null>(null)
+
+  const discoverPages = useDiscoverPages()
+  const bulkCreatePages = useBulkCreatePages()
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -48,22 +48,24 @@ export function DiscoverPagesDialog({
   }, [open])
 
   const handleDiscover = async () => {
-    setIsDiscovering(true)
     setError(null)
     setDiscoveredPages([])
     setSelectedUrls(new Set())
 
-    try {
-      const result = await api.discoverPages(site.id, maxPages)
-      setDiscoveredPages(result.pages)
-      setTotalFound(result.totalFound)
-      // Select all pages by default
-      setSelectedUrls(new Set(result.pages.map((p) => p.url)))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to discover pages')
-    } finally {
-      setIsDiscovering(false)
-    }
+    discoverPages.mutate(
+      { siteId: site.id, maxPages },
+      {
+        onSuccess: (result) => {
+          setDiscoveredPages(result.pages)
+          setTotalFound(result.totalFound)
+          // Select all pages by default
+          setSelectedUrls(new Set(result.pages.map((p) => p.url)))
+        },
+        onError: (err) => {
+          setError(err instanceof Error ? err.message : 'Failed to discover pages')
+        },
+      }
+    )
   }
 
   const handleTogglePage = (url: string) => {
@@ -90,25 +92,25 @@ export function DiscoverPagesDialog({
       return
     }
 
-    setIsAdding(true)
+    const pagesToAdd = discoveredPages
+      .filter((p) => selectedUrls.has(p.url))
+      .map((p) => ({
+        url: p.url,
+        name: p.title,
+      }))
 
-    try {
-      const pagesToAdd = discoveredPages
-        .filter((p) => selectedUrls.has(p.url))
-        .map((p) => ({
-          url: p.url,
-          name: p.title,
-        }))
-
-      const result = await api.bulkCreatePages(site.id, pagesToAdd)
-      toast.success(`Added ${result.created} pages`)
-      onOpenChange(false)
-      onSuccess()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add pages')
-    } finally {
-      setIsAdding(false)
-    }
+    bulkCreatePages.mutate(
+      { siteId: site.id, pages: pagesToAdd },
+      {
+        onSuccess: (result) => {
+          toast.success(`Added ${result.created} pages`)
+          onOpenChange(false)
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : 'Failed to add pages')
+        },
+      }
+    )
   }
 
   return (
@@ -126,7 +128,7 @@ export function DiscoverPagesDialog({
 
         <div className="flex-1 min-h-0 space-y-4">
           {/* Discovery controls */}
-          {discoveredPages.length === 0 && !isDiscovering && (
+          {discoveredPages.length === 0 && !discoverPages.isPending && (
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="max-pages">Maximum pages to discover</Label>
@@ -160,7 +162,7 @@ export function DiscoverPagesDialog({
           )}
 
           {/* Loading state */}
-          {isDiscovering && (
+          {discoverPages.isPending && (
             <div className="flex flex-col items-center justify-center py-12 space-y-4">
               <Icon name="progress_activity" className="animate-spin text-purple-500" size="lg" />
               <div className="text-center">
@@ -173,7 +175,7 @@ export function DiscoverPagesDialog({
           )}
 
           {/* Results */}
-          {discoveredPages.length > 0 && !isDiscovering && (
+          {discoveredPages.length > 0 && !discoverPages.isPending && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
@@ -211,7 +213,7 @@ export function DiscoverPagesDialog({
                 </div>
               </ScrollArea>
 
-              <Button variant="outline" size="sm" onClick={handleDiscover} disabled={isDiscovering}>
+              <Button variant="outline" size="sm" onClick={handleDiscover} disabled={discoverPages.isPending}>
                 <Icon name="refresh" size="sm" />
                 Re-discover
               </Button>
@@ -220,12 +222,12 @@ export function DiscoverPagesDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isAdding}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={bulkCreatePages.isPending}>
             Cancel
           </Button>
           {discoveredPages.length > 0 && (
-            <Button onClick={handleAddSelected} disabled={isAdding || selectedUrls.size === 0}>
-              {isAdding ? (
+            <Button onClick={handleAddSelected} disabled={bulkCreatePages.isPending || selectedUrls.size === 0}>
+              {bulkCreatePages.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Adding...

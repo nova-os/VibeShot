@@ -13,7 +13,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Icon } from '@/components/ui/icon'
-import { api, Instruction } from '@/lib/api'
+import { Instruction } from '@/lib/api'
+import { useUpdateInstruction } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface EditInstructionDialogProps {
@@ -21,7 +22,6 @@ interface EditInstructionDialogProps {
   onOpenChange: (open: boolean) => void
   instruction: Instruction
   pageId: number
-  onSuccess: () => void
 }
 
 export function EditInstructionDialog({
@@ -29,13 +29,13 @@ export function EditInstructionDialog({
   onOpenChange,
   instruction,
   pageId,
-  onSuccess,
 }: EditInstructionDialogProps) {
   const [name, setName] = useState(instruction.name)
   const [prompt, setPrompt] = useState(instruction.prompt)
   const [script, setScript] = useState(instruction.script || '')
   const [isActive, setIsActive] = useState(instruction.is_active)
-  const [isLoading, setIsLoading] = useState(false)
+  
+  const updateInstruction = useUpdateInstruction()
 
   useEffect(() => {
     setName(instruction.name)
@@ -46,23 +46,28 @@ export function EditInstructionDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      await api.updateInstruction(pageId, instruction.id, {
-        name,
-        prompt,
-        script: script || undefined,
-        is_active: isActive,
-      })
-      toast.success('Instruction updated')
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update instruction')
-    } finally {
-      setIsLoading(false)
-    }
+    updateInstruction.mutate(
+      {
+        pageId,
+        instructionId: instruction.id,
+        data: {
+          name,
+          prompt,
+          script: script || undefined,
+          is_active: isActive,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Instruction updated')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update instruction')
+        },
+      }
+    )
   }
 
   return (
@@ -83,7 +88,7 @@ export function EditInstructionDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={updateInstruction.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -94,7 +99,7 @@ export function EditInstructionDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={3}
                 required
-                disabled={isLoading}
+                disabled={updateInstruction.isPending}
               />
             </div>
             <div className="flex items-center justify-between">
@@ -105,7 +110,7 @@ export function EditInstructionDialog({
                 id="edit-instruction-active"
                 checked={isActive}
                 onCheckedChange={setIsActive}
-                disabled={isLoading}
+                disabled={updateInstruction.isPending}
               />
             </div>
             {instruction.script && (
@@ -117,7 +122,7 @@ export function EditInstructionDialog({
                   onChange={(e) => setScript(e.target.value)}
                   rows={6}
                   className="font-mono text-sm"
-                  disabled={isLoading}
+                  disabled={updateInstruction.isPending}
                 />
                 <p className="text-xs text-muted-foreground">
                   You can manually edit the script if needed.
@@ -126,11 +131,11 @@ export function EditInstructionDialog({
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={updateInstruction.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" disabled={updateInstruction.isPending}>
+              {updateInstruction.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Saving...

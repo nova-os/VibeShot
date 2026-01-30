@@ -15,8 +15,9 @@ import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Icon } from '@/components/ui/icon'
 import { Separator } from '@/components/ui/separator'
-import { api, Page, UserSettings } from '@/lib/api'
+import { Page } from '@/lib/api'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
+import { useSettings, useUpdatePage } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 import { DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS } from '@/lib/constants'
 
@@ -24,14 +25,12 @@ interface EditPageDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   page: Page
-  onSuccess: () => void
 }
 
-export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPageDialogProps) {
+export function EditPageDialog({ open, onOpenChange, page }: EditPageDialogProps) {
   const [name, setName] = useState(page.name)
   const [url, setUrl] = useState(page.url)
   const [isActive, setIsActive] = useState(page.is_active)
-  const [isLoading, setIsLoading] = useState(false)
   
   // Custom settings state
   const [useCustomSettings, setUseCustomSettings] = useState(false)
@@ -39,15 +38,8 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
   const [viewports, setViewports] = useState<number[]>(DEFAULT_VIEWPORTS)
   
   // User settings for defaults display
-  const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
-  const [loadingSettings, setLoadingSettings] = useState(false)
-
-  // Load user settings when dialog opens
-  useEffect(() => {
-    if (open) {
-      loadUserSettings()
-    }
-  }, [open])
+  const { data: userSettings, isLoading: loadingSettings } = useSettings()
+  const updatePage = useUpdatePage()
 
   // Initialize form state when page changes
   useEffect(() => {
@@ -78,25 +70,13 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
       setIntervalMinutes(userSettings.default_interval_minutes)
       setViewports(userSettings.default_viewports)
     }
-  }, [userSettings, useCustomSettings])
-
-  const loadUserSettings = async () => {
-    try {
-      setLoadingSettings(true)
-      const settings = await api.getSettings()
-      setUserSettings(settings)
-      
-      // If page doesn't have custom settings, use the loaded defaults
-      if (page.interval_minutes === null && page.viewports === null) {
-        setIntervalMinutes(settings.default_interval_minutes)
-        setViewports(settings.default_viewports)
-      }
-    } catch (error) {
-      console.error('Failed to load user settings:', error)
-    } finally {
-      setLoadingSettings(false)
+    
+    // If page doesn't have custom settings, use the loaded defaults
+    if (userSettings && page.interval_minutes === null && page.viewports === null) {
+      setIntervalMinutes(userSettings.default_interval_minutes)
+      setViewports(userSettings.default_viewports)
     }
-  }
+  }, [userSettings, useCustomSettings, page])
 
   const handleSettingsChange = (settings: { intervalMinutes: number; viewports: number[] }) => {
     setIntervalMinutes(settings.intervalMinutes)
@@ -105,25 +85,29 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      await api.updatePage(page.id, {
-        name,
-        url,
-        is_active: isActive,
-        // If using custom settings, send the values; otherwise send null to use defaults
-        interval_minutes: useCustomSettings ? intervalMinutes : null,
-        viewports: useCustomSettings ? viewports : null,
-      })
-      toast.success('Page updated successfully')
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update page')
-    } finally {
-      setIsLoading(false)
-    }
+    updatePage.mutate(
+      {
+        id: page.id,
+        data: {
+          name,
+          url,
+          is_active: isActive,
+          // If using custom settings, send the values; otherwise send null to use defaults
+          interval_minutes: useCustomSettings ? intervalMinutes : null,
+          viewports: useCustomSettings ? viewports : null,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Page updated successfully')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update page')
+        },
+      }
+    )
   }
 
   return (
@@ -145,7 +129,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={updatePage.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -156,7 +140,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={updatePage.isPending}
               />
             </div>
             <div className="flex items-center justify-between">
@@ -167,7 +151,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
                 id="edit-page-active"
                 checked={isActive}
                 onCheckedChange={setIsActive}
-                disabled={isLoading}
+                disabled={updatePage.isPending}
               />
             </div>
 
@@ -180,7 +164,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
                   id="use-custom-settings"
                   checked={useCustomSettings}
                   onCheckedChange={(checked) => setUseCustomSettings(checked === true)}
-                  disabled={isLoading}
+                  disabled={updatePage.isPending}
                 />
                 <Label htmlFor="use-custom-settings" className="cursor-pointer font-medium">
                   Use custom capture settings
@@ -193,7 +177,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
                     intervalMinutes={intervalMinutes}
                     viewports={viewports}
                     onChange={handleSettingsChange}
-                    disabled={isLoading}
+                    disabled={updatePage.isPending}
                   />
                 </div>
               ) : (
@@ -235,11 +219,11 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={updatePage.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" disabled={updatePage.isPending}>
+              {updatePage.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Saving...

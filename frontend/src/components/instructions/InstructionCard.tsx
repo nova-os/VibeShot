@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
 import { ActionSequenceDisplay } from '@/components/ui/action-sequence-display'
 import { AiChatHistoryDialog } from '@/components/ai/AiChatHistoryDialog'
-import { Instruction, api } from '@/lib/api'
+import { Instruction } from '@/lib/api'
+import { useUpdateInstruction, useRegenerateInstruction } from '@/hooks/useQueries'
 import { cn, formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -15,7 +16,6 @@ interface InstructionCardProps {
   index: number
   totalCount: number
   pageId: number
-  onUpdate: () => void
   onEdit: () => void
   onDelete: () => void
   onMove: (direction: 'up' | 'down') => void
@@ -26,14 +26,14 @@ export function InstructionCard({
   index,
   totalCount,
   pageId,
-  onUpdate,
   onEdit,
   onDelete,
   onMove,
 }: InstructionCardProps) {
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const [isToggling, setIsToggling] = useState(false)
   const [showChatHistory, setShowChatHistory] = useState(false)
+  
+  const updateInstruction = useUpdateInstruction()
+  const regenerateInstruction = useRegenerateInstruction()
 
   const hasScript = instruction.script && instruction.script.trim().length > 0
   const hasError = instruction.last_error && instruction.last_error.trim().length > 0
@@ -52,30 +52,32 @@ export function InstructionCard({
     return <Badge variant="warning">Pending</Badge>
   }
 
-  const handleToggle = async (checked: boolean) => {
-    setIsToggling(true)
-    try {
-      await api.updateInstruction(pageId, instruction.id, { is_active: checked })
-      toast.success(checked ? 'Instruction enabled' : 'Instruction disabled')
-      onUpdate()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update instruction')
-    } finally {
-      setIsToggling(false)
-    }
+  const handleToggle = (checked: boolean) => {
+    updateInstruction.mutate(
+      { pageId, instructionId: instruction.id, data: { is_active: checked } },
+      {
+        onSuccess: () => {
+          toast.success(checked ? 'Instruction enabled' : 'Instruction disabled')
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update instruction')
+        },
+      }
+    )
   }
 
-  const handleRegenerate = async () => {
-    setIsRegenerating(true)
-    try {
-      await api.regenerateInstruction(pageId, instruction.id)
-      toast.success('Script regenerated successfully')
-      onUpdate()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to regenerate script')
-    } finally {
-      setIsRegenerating(false)
-    }
+  const handleRegenerate = () => {
+    regenerateInstruction.mutate(
+      { pageId, instructionId: instruction.id },
+      {
+        onSuccess: () => {
+          toast.success('Script regenerated successfully')
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to regenerate script')
+        },
+      }
+    )
   }
 
   return (
@@ -138,7 +140,7 @@ export function InstructionCard({
           <Switch
             checked={instruction.is_active}
             onCheckedChange={handleToggle}
-            disabled={isToggling}
+            disabled={updateInstruction.isPending}
           />
           <Button 
             variant="ghost" 
@@ -155,12 +157,12 @@ export function InstructionCard({
             variant="ghost"
             size="icon"
             onClick={handleRegenerate}
-            disabled={isRegenerating}
+            disabled={regenerateInstruction.isPending}
           >
             <Icon
               name="refresh"
               size="sm"
-              className={cn(isRegenerating && "animate-spin")}
+              className={cn(regenerateInstruction.isPending && "animate-spin")}
             />
           </Button>
           <Button

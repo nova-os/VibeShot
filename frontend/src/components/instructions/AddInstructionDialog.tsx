@@ -21,50 +21,50 @@ import {
 } from '@/components/ui/select'
 import { Icon } from '@/components/ui/icon'
 import { AiChatPanel } from '@/components/ai/AiChatPanel'
-import { api } from '@/lib/api'
+import { useCreateInstruction } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface AddInstructionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   pageId: number
-  onSuccess: () => void
 }
 
 export function AddInstructionDialog({
   open,
   onOpenChange,
   pageId,
-  onSuccess,
 }: AddInstructionDialogProps) {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [viewport, setViewport] = useState('desktop')
   const [useActions, setUseActions] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<number | null>(null)
   const [isComplete, setIsComplete] = useState(false)
+  
+  const createInstruction = useCreateInstruction()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      const instruction = await api.createInstruction(pageId, { name, prompt, viewport, useActions })
-      
-      if (instruction.sessionId) {
-        // Show the chat panel for live updates
-        setSessionId(instruction.sessionId)
-      } else {
-        // Fallback for when no session is created (shouldn't happen normally)
-        toast.success('Instruction created')
-        handleClose()
-        onSuccess()
+    createInstruction.mutate(
+      { pageId, data: { name, prompt, viewport, useActions } },
+      {
+        onSuccess: (instruction) => {
+          if (instruction.sessionId) {
+            // Show the chat panel for live updates
+            setSessionId(instruction.sessionId)
+          } else {
+            // Fallback for when no session is created (shouldn't happen normally)
+            toast.success('Instruction created')
+            handleClose()
+          }
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to create instruction')
+        },
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create instruction')
-      setIsLoading(false)
-    }
+    )
   }
 
   const handleGenerationComplete = () => {
@@ -77,7 +77,6 @@ export function AddInstructionDialog({
     setPrompt('')
     setViewport('desktop')
     setUseActions(false)
-    setIsLoading(false)
     setSessionId(null)
     setIsComplete(false)
     onOpenChange(false)
@@ -86,7 +85,6 @@ export function AddInstructionDialog({
   const handleFinish = () => {
     toast.success('Instruction created with AI-generated script')
     handleClose()
-    onSuccess()
   }
 
   // Show chat panel when generating
@@ -146,7 +144,7 @@ export function AddInstructionDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={createInstruction.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -158,7 +156,7 @@ export function AddInstructionDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={4}
                 required
-                disabled={isLoading}
+                disabled={createInstruction.isPending}
               />
               <p className="text-xs text-muted-foreground">
                 Describe the action in plain English. AI will analyze the page and generate the script.
@@ -166,7 +164,7 @@ export function AddInstructionDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="instruction-viewport">Viewport for analysis</Label>
-              <Select value={viewport} onValueChange={setViewport} disabled={isLoading}>
+              <Select value={viewport} onValueChange={setViewport} disabled={createInstruction.isPending}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -191,16 +189,16 @@ export function AddInstructionDialog({
                 id="use-actions"
                 checked={useActions}
                 onCheckedChange={setUseActions}
-                disabled={isLoading}
+                disabled={createInstruction.isPending}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={createInstruction.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" disabled={createInstruction.isPending}>
+              {createInstruction.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Starting...

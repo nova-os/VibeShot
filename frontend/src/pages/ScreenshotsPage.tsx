@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, Page, Screenshot, Instruction, Test, CaptureJob } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
+import { api, Screenshot, CaptureJob } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
@@ -14,7 +15,8 @@ import { DeletePageDialog } from '@/components/pages/DeletePageDialog'
 import { InstructionsList } from '@/components/instructions/InstructionsList'
 import { TestsList } from '@/components/tests/TestsList'
 import { DeleteScreenshotsDialog } from '@/components/screenshots/DeleteScreenshotsDialog'
-import { usePolling } from '@/hooks/usePolling'
+import { usePage, useScreenshots, useInstructions, useTests, useTriggerCapture } from '@/hooks/useQueries'
+import { queryKeys } from '@/lib/queryClient'
 import { toast } from 'sonner'
 
 type ViewportFilter = 'all' | 'desktop' | 'tablet' | 'mobile'
@@ -27,14 +29,29 @@ interface ScreenshotGroupData {
 export function ScreenshotsPage() {
   const { siteId, pageId } = useParams<{ siteId: string; pageId: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const parsedPageId = pageId ? parseInt(pageId, 10) : undefined
 
-  const [page, setPage] = useState<Page | null>(null)
-  const [screenshots, setScreenshots] = useState<Screenshot[]>([])
-  const [instructions, setInstructions] = useState<Instruction[]>([])
-  const [tests, setTests] = useState<Test[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [viewportFilter, setViewportFilter] = useState<ViewportFilter>('all')
-  const initialLoadDone = useRef(false)
+
+  // TanStack Query for data fetching
+  const { data: page, isLoading: pageLoading, error: pageError } = usePage(parsedPageId)
+  const { data: screenshotsData } = useScreenshots(parsedPageId, {
+    viewport: viewportFilter === 'all' ? null : viewportFilter,
+    enabled: !!page,
+  })
+  const { data: instructions = [] } = useInstructions(parsedPageId)
+  const { data: tests = [] } = useTests(parsedPageId)
+  
+  const screenshots = screenshotsData?.screenshots ?? []
+  const isLoading = pageLoading
+
+  // Show error toast on initial load error
+  useEffect(() => {
+    if (pageError) {
+      toast.error(pageError instanceof Error ? pageError.message : 'Failed to load page')
+    }
+  }, [pageError])
 
   // Compare mode
   const [compareMode, setCompareMode] = useState(false)
@@ -54,65 +71,7 @@ export function ScreenshotsPage() {
   // Capture job tracking
   const [captureJob, setCaptureJob] = useState<CaptureJob | null>(null)
   const capturePollingRef = useRef<NodeJS.Timeout | null>(null)
-
-  const loadData = useCallback(async () => {
-    if (!pageId) return
-
-    try {
-      const [pageData, instructionsData, testsData] = await Promise.all([
-        api.getPage(parseInt(pageId, 10)),
-        api.getInstructions(parseInt(pageId, 10)),
-        api.getTests(parseInt(pageId, 10)),
-      ])
-      setPage(pageData)
-      setInstructions(instructionsData)
-      setTests(testsData)
-    } catch (error) {
-      // Only show error on initial load, not during polling
-      if (!initialLoadDone.current) {
-        toast.error(error instanceof Error ? error.message : 'Failed to load page')
-      }
-    } finally {
-      setIsLoading(false)
-      initialLoadDone.current = true
-    }
-  }, [pageId])
-
-  const loadScreenshots = useCallback(async () => {
-    if (!pageId) return
-
-    try {
-      const result = await api.getScreenshots(parseInt(pageId, 10), {
-        viewport: viewportFilter === 'all' ? null : viewportFilter,
-      })
-      setScreenshots(result.screenshots)
-    } catch (error) {
-      // Silently fail during polling to avoid error spam
-      if (!initialLoadDone.current) {
-        toast.error(error instanceof Error ? error.message : 'Failed to load screenshots')
-      }
-    }
-  }, [pageId, viewportFilter])
-
-  // Combined refresh function for polling
-  const refreshAll = useCallback(async () => {
-    await Promise.all([loadData(), loadScreenshots()])
-  }, [loadData, loadScreenshots])
-
-  useEffect(() => {
-    initialLoadDone.current = false
-    setIsLoading(true)
-    loadData()
-  }, [pageId]) // Only reload when pageId changes
-
-  useEffect(() => {
-    if (page) {
-      loadScreenshots()
-    }
-  }, [page, viewportFilter]) // Reload screenshots when page loads or viewport filter changes
-
-  // Poll for updates every 30 seconds
-  usePolling(refreshAll, { enabled: !!pageId && !!page })
+  const triggerCapture = useTriggerCapture()
 
   // Group screenshots by timestamp
   const groupedScreenshots = useMemo((): ScreenshotGroupData[] => {
@@ -138,16 +97,18 @@ export function ScreenshotsPage() {
 
   // Poll capture status
   const pollCaptureStatus = useCallback(async () => {
-    if (!pageId) return
+    if (!parsedPageId) return
     
     try {
-      const { job } = await api.getCaptureStatus(parseInt(pageId, 10))
+      const { job } = await api.getCaptureStatus(parsedPageId)
       setCaptureJob(job)
       
-      // If job completed or failed, reload screenshots and stop polling
+      // If job completed or failed, invalidate screenshots and stop polling
       if (job && (job.status === 'completed' || job.status === 'failed')) {
         if (job.status === 'completed') {
-          loadScreenshots()
+          queryClient.invalidateQueries({ 
+            queryKey: queryKeys.screenshots.list(parsedPageId, viewportFilter === 'all' ? null : viewportFilter) 
+          })
         }
         // Stop polling
         if (capturePollingRef.current) {
@@ -158,7 +119,7 @@ export function ScreenshotsPage() {
     } catch (error) {
       // Ignore polling errors
     }
-  }, [pageId, loadScreenshots])
+  }, [parsedPageId, queryClient, viewportFilter])
 
   // Start/stop capture status polling based on active job
   useEffect(() => {
@@ -183,38 +144,40 @@ export function ScreenshotsPage() {
 
   // Load initial capture status
   useEffect(() => {
-    if (pageId) {
-      api.getCaptureStatus(parseInt(pageId, 10))
+    if (parsedPageId) {
+      api.getCaptureStatus(parsedPageId)
         .then(({ job }) => setCaptureJob(job))
         .catch(() => {})
     }
-  }, [pageId])
+  }, [parsedPageId])
 
   const handleCaptureNow = async () => {
     if (!page) return
 
-    try {
-      const { jobId } = await api.triggerCapture(page.id)
-      toast.success('Screenshot capture scheduled')
-      
-      // Start tracking the new job
-      setCaptureJob({
-        id: jobId,
-        status: 'pending',
-        current_viewport: null,
-        viewports_completed: 0,
-        viewports_total: 0,
-        error_message: null,
-        started_at: null,
-        completed_at: null,
-        created_at: new Date().toISOString(),
-      })
-      
-      // Start polling immediately
-      pollCaptureStatus()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to trigger capture')
-    }
+    triggerCapture.mutate(page.id, {
+      onSuccess: ({ jobId }) => {
+        toast.success('Screenshot capture scheduled')
+        
+        // Start tracking the new job
+        setCaptureJob({
+          id: jobId,
+          status: 'pending',
+          current_viewport: null,
+          viewports_completed: 0,
+          viewports_total: 0,
+          error_message: null,
+          started_at: null,
+          completed_at: null,
+          created_at: new Date().toISOString(),
+        })
+        
+        // Start polling immediately
+        pollCaptureStatus()
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to trigger capture')
+      },
+    })
   }
 
   const isCapturing = captureJob && (captureJob.status === 'pending' || captureJob.status === 'capturing')
@@ -382,14 +345,12 @@ export function ScreenshotsPage() {
       <InstructionsList
         pageId={page.id}
         instructions={instructions}
-        onUpdate={loadData}
       />
 
       {/* Tests Section */}
       <TestsList
         pageId={page.id}
         tests={tests}
-        onUpdate={loadData}
       />
 
       {/* Viewport Filter & Mode Controls */}
@@ -526,7 +487,6 @@ export function ScreenshotsPage() {
             open={editDialogOpen}
             onOpenChange={setEditDialogOpen}
             page={page}
-            onSuccess={loadData}
           />
 
           <DeletePageDialog
@@ -565,7 +525,6 @@ export function ScreenshotsPage() {
         onSuccess={() => {
           setDeleteMode(false)
           setSelectedGroups(new Set())
-          loadScreenshots()
         }}
       />
     </div>

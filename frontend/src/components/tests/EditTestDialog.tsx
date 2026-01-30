@@ -14,7 +14,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Icon } from '@/components/ui/icon'
-import { api, Test } from '@/lib/api'
+import { Test } from '@/lib/api'
+import { useUpdateTest } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 const VIEWPORT_OPTIONS = [
@@ -28,7 +29,6 @@ interface EditTestDialogProps {
   onOpenChange: (open: boolean) => void
   test: Test
   pageId: number
-  onSuccess: () => void
 }
 
 export function EditTestDialog({
@@ -36,14 +36,14 @@ export function EditTestDialog({
   onOpenChange,
   test,
   pageId,
-  onSuccess,
 }: EditTestDialogProps) {
   const [name, setName] = useState(test.name)
   const [prompt, setPrompt] = useState(test.prompt)
   const [script, setScript] = useState(test.script || '')
   const [isActive, setIsActive] = useState(test.is_active)
   const [viewports, setViewports] = useState<string[]>(test.viewports || [])
-  const [isLoading, setIsLoading] = useState(false)
+  
+  const updateTest = useUpdateTest()
 
   useEffect(() => {
     setName(test.name)
@@ -63,24 +63,29 @@ export function EditTestDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      await api.updateTest(pageId, test.id, {
-        name,
-        prompt,
-        script: script || undefined,
-        is_active: isActive,
-        viewports: viewports.length > 0 ? viewports : null,
-      })
-      toast.success('Test updated')
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update test')
-    } finally {
-      setIsLoading(false)
-    }
+    updateTest.mutate(
+      {
+        pageId,
+        testId: test.id,
+        data: {
+          name,
+          prompt,
+          script: script || undefined,
+          is_active: isActive,
+          viewports: viewports.length > 0 ? viewports : null,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success('Test updated')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update test')
+        },
+      }
+    )
   }
 
   return (
@@ -101,7 +106,7 @@ export function EditTestDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={updateTest.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -112,7 +117,7 @@ export function EditTestDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={3}
                 required
-                disabled={isLoading}
+                disabled={updateTest.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -126,7 +131,7 @@ export function EditTestDialog({
                     <Checkbox
                       checked={viewports.length === 0 || viewports.includes(vp.value)}
                       onCheckedChange={() => toggleViewport(vp.value)}
-                      disabled={isLoading}
+                      disabled={updateTest.isPending}
                     />
                     <span className="material-symbols-outlined text-sm">{vp.icon}</span>
                     <span className="text-sm">{vp.label}</span>
@@ -148,7 +153,7 @@ export function EditTestDialog({
                 id="edit-test-active"
                 checked={isActive}
                 onCheckedChange={setIsActive}
-                disabled={isLoading}
+                disabled={updateTest.isPending}
               />
             </div>
             {test.script && (
@@ -160,7 +165,7 @@ export function EditTestDialog({
                   onChange={(e) => setScript(e.target.value)}
                   rows={8}
                   className="font-mono text-sm"
-                  disabled={isLoading}
+                  disabled={updateTest.isPending}
                 />
                 <p className="text-xs text-muted-foreground">
                   You can manually edit the script if needed. Script must return {"{ passed: boolean, message: string }"}.
@@ -169,11 +174,11 @@ export function EditTestDialog({
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={updateTest.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" disabled={updateTest.isPending}>
+              {updateTest.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Saving...

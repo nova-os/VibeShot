@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Icon } from '@/components/ui/icon'
 import { ActionSequenceDisplay } from '@/components/ui/action-sequence-display'
 import { AiChatHistoryDialog } from '@/components/ai/AiChatHistoryDialog'
-import { Test, api } from '@/lib/api'
+import { Test } from '@/lib/api'
+import { useUpdateTest, useRegenerateTest } from '@/hooks/useQueries'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -21,7 +22,6 @@ interface TestCardProps {
   index: number
   totalCount: number
   pageId: number
-  onUpdate: () => void
   onEdit: () => void
   onDelete: () => void
   onMove: (direction: 'up' | 'down') => void
@@ -32,14 +32,14 @@ export function TestCard({
   index,
   totalCount,
   pageId,
-  onUpdate,
   onEdit,
   onDelete,
   onMove,
 }: TestCardProps) {
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const [isToggling, setIsToggling] = useState(false)
   const [showChatHistory, setShowChatHistory] = useState(false)
+  
+  const updateTest = useUpdateTest()
+  const regenerateTest = useRegenerateTest()
 
   const hasScript = test.script && test.script.trim().length > 0
 
@@ -68,30 +68,32 @@ export function TestCard({
     ))
   }
 
-  const handleToggle = async (checked: boolean) => {
-    setIsToggling(true)
-    try {
-      await api.updateTest(pageId, test.id, { is_active: checked })
-      toast.success(checked ? 'Test enabled' : 'Test disabled')
-      onUpdate()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update test')
-    } finally {
-      setIsToggling(false)
-    }
+  const handleToggle = (checked: boolean) => {
+    updateTest.mutate(
+      { pageId, testId: test.id, data: { is_active: checked } },
+      {
+        onSuccess: () => {
+          toast.success(checked ? 'Test enabled' : 'Test disabled')
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to update test')
+        },
+      }
+    )
   }
 
-  const handleRegenerate = async () => {
-    setIsRegenerating(true)
-    try {
-      await api.regenerateTest(pageId, test.id)
-      toast.success('Test script regenerated successfully')
-      onUpdate()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to regenerate test script')
-    } finally {
-      setIsRegenerating(false)
-    }
+  const handleRegenerate = () => {
+    regenerateTest.mutate(
+      { pageId, testId: test.id },
+      {
+        onSuccess: () => {
+          toast.success('Test script regenerated successfully')
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to regenerate test script')
+        },
+      }
+    )
   }
 
   return (
@@ -149,7 +151,7 @@ export function TestCard({
           <Switch
             checked={test.is_active}
             onCheckedChange={handleToggle}
-            disabled={isToggling}
+            disabled={updateTest.isPending}
           />
           <Button 
             variant="ghost" 
@@ -166,12 +168,12 @@ export function TestCard({
             variant="ghost"
             size="icon"
             onClick={handleRegenerate}
-            disabled={isRegenerating}
+            disabled={regenerateTest.isPending}
           >
             <Icon
               name="refresh"
               size="sm"
-              className={cn(isRegenerating && "animate-spin")}
+              className={cn(regenerateTest.isPending && "animate-spin")}
             />
           </Button>
           <Button

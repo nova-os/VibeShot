@@ -8,8 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { useState } from 'react'
-import { api, Site } from '@/lib/api'
+import { Site } from '@/lib/api'
+import { useDeleteSite } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 
@@ -20,22 +20,20 @@ interface DeleteSiteDialogProps {
 }
 
 export function DeleteSiteDialog({ open, onOpenChange, site }: DeleteSiteDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
+  const deleteSite = useDeleteSite()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      await api.deleteSite(site.id)
-      toast.success('Site deleted successfully')
-      onOpenChange(false)
-      navigate('/')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete site')
-    } finally {
-      setIsLoading(false)
-    }
+    deleteSite.mutate(site.id, {
+      onSuccess: () => {
+        toast.success('Site deleted successfully')
+        onOpenChange(false)
+        navigate('/')
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to delete site')
+      },
+    })
   }
 
   return (
@@ -52,11 +50,11 @@ export function DeleteSiteDialog({ open, onOpenChange, site }: DeleteSiteDialogP
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deleteSite.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleteSite.isPending}>
+            {deleteSite.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...

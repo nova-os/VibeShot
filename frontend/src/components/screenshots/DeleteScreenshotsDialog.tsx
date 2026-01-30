@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -9,7 +8,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { api } from '@/lib/api'
+import { useDeleteScreenshots } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DeleteScreenshotsDialogProps {
@@ -25,21 +24,19 @@ export function DeleteScreenshotsDialog({
   screenshotIds,
   onSuccess,
 }: DeleteScreenshotsDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+  const deleteScreenshots = useDeleteScreenshots()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      const result = await api.deleteScreenshotSet(screenshotIds)
-      toast.success(`Deleted ${result.deletedCount} screenshot${result.deletedCount !== 1 ? 's' : ''}`)
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete screenshots')
-    } finally {
-      setIsLoading(false)
-    }
+    deleteScreenshots.mutate(screenshotIds, {
+      onSuccess: (result) => {
+        toast.success(`Deleted ${result.deletedCount} screenshot${result.deletedCount !== 1 ? 's' : ''}`)
+        onOpenChange(false)
+        onSuccess()
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to delete screenshots')
+      },
+    })
   }
 
   const count = screenshotIds.length
@@ -58,11 +55,11 @@ export function DeleteScreenshotsDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deleteScreenshots.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleteScreenshots.isPending}>
+            {deleteScreenshots.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...

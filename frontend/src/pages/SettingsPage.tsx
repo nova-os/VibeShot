@@ -1,39 +1,40 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { api, UserSettings } from '@/lib/api'
+import { UserSettings } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Icon } from '@/components/ui/icon'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
 import { RetentionSettingsForm, RetentionSettings } from '@/components/settings/RetentionSettingsForm'
+import { useSettings, useUpdateSettings } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 export function SettingsPage() {
+  // Fetch settings with TanStack Query
+  const { data: fetchedSettings, isLoading, error, refetch } = useSettings()
+  const updateSettings = useUpdateSettings()
+  
+  // Local state for editing
   const [settings, setSettings] = useState<UserSettings | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [originalSettings, setOriginalSettings] = useState<UserSettings | null>(null)
 
+  // Initialize local state from fetched data
   useEffect(() => {
-    loadSettings()
-  }, [])
+    if (fetchedSettings && !settings) {
+      setSettings(fetchedSettings)
+      setOriginalSettings(fetchedSettings)
+    }
+  }, [fetchedSettings, settings])
 
-  const loadSettings = async () => {
-    try {
-      setIsLoading(true)
-      const data = await api.getSettings()
-      setSettings(data)
-      setOriginalSettings(data)
-      setHasChanges(false)
-    } catch (error) {
+  // Show error toast
+  useEffect(() => {
+    if (error) {
       toast.error('Failed to load settings')
       console.error('Load settings error:', error)
-    } finally {
-      setIsLoading(false)
     }
-  }
+  }, [error])
 
   const handleCaptureChange = (newSettings: { intervalMinutes: number; viewports: number[] }) => {
     if (!settings) return
@@ -80,18 +81,17 @@ export function SettingsPage() {
   const handleSave = async () => {
     if (!settings) return
 
-    try {
-      setIsSaving(true)
-      const updated = await api.updateSettings(settings)
-      setSettings(updated)
-      setOriginalSettings(updated)
-      setHasChanges(false)
-      toast.success('Settings saved successfully')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save settings')
-    } finally {
-      setIsSaving(false)
-    }
+    updateSettings.mutate(settings, {
+      onSuccess: (updated) => {
+        setSettings(updated)
+        setOriginalSettings(updated)
+        setHasChanges(false)
+        toast.success('Settings saved successfully')
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to save settings')
+      },
+    })
   }
 
   const handleReset = () => {
@@ -146,7 +146,7 @@ export function SettingsPage() {
           <CardContent className="py-12 text-center">
             <Icon name="error" className="mx-auto mb-4 text-destructive" size="lg" />
             <p className="text-muted-foreground">Failed to load settings</p>
-            <Button onClick={loadSettings} variant="outline" className="mt-4">
+            <Button onClick={() => refetch()} variant="outline" className="mt-4">
               Try again
             </Button>
           </CardContent>
@@ -171,11 +171,11 @@ export function SettingsPage() {
 
         {hasChanges && (
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={handleReset} disabled={isSaving}>
+            <Button variant="ghost" onClick={handleReset} disabled={updateSettings.isPending}>
               Reset
             </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
+            <Button onClick={handleSave} disabled={updateSettings.isPending}>
+              {updateSettings.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin mr-1" size="sm" />
                   Saving...
@@ -207,7 +207,7 @@ export function SettingsPage() {
             intervalMinutes={settings.default_interval_minutes}
             viewports={settings.default_viewports}
             onChange={handleCaptureChange}
-            disabled={isSaving}
+            disabled={updateSettings.isPending}
           />
         </CardContent>
       </Card>
@@ -236,7 +236,7 @@ export function SettingsPage() {
               max_age_days: settings.max_age_days,
             }}
             onChange={handleRetentionChange}
-            disabled={isSaving}
+            disabled={updateSettings.isPending}
           />
         </CardContent>
       </Card>

@@ -1,37 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
-import { api, Site } from '@/lib/api'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { SiteCard, SiteCardSkeleton, EmptyState } from '@/components/sites/SiteCard'
 import { AddSiteDialog } from '@/components/sites/AddSiteDialog'
-import { usePolling } from '@/hooks/usePolling'
-import { toast } from 'sonner'
+import { useSites } from '@/hooks/useQueries'
 
 export function DashboardPage() {
-  const [sites, setSites] = useState<Site[]>([])
-  const [isLoading, setIsLoading] = useState(true)
   const [addDialogOpen, setAddDialogOpen] = useState(false)
-
-  const loadSites = useCallback(async () => {
-    try {
-      const data = await api.getSites()
-      setSites(data)
-    } catch (error) {
-      // Only show error on initial load, not during polling
-      if (isLoading) {
-        toast.error(error instanceof Error ? error.message : 'Failed to load sites')
-      }
-    } finally {
-      setIsLoading(false)
-    }
-  }, [isLoading])
-
-  useEffect(() => {
-    loadSites()
-  }, []) // Only run once on mount
-
-  // Poll for updates every 30 seconds
-  usePolling(loadSites)
+  const { data: sites = [], isLoading } = useSites()
 
   return (
     <div>
@@ -65,7 +41,6 @@ export function DashboardPage() {
       <AddSiteDialog
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
-        onSuccess={loadSites}
       />
     </div>
   )

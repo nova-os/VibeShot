@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/select'
 import { Icon } from '@/components/ui/icon'
 import { AiChatPanel } from '@/components/ai/AiChatPanel'
-import { api } from '@/lib/api'
+import { useCreateTest } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 const VIEWPORT_OPTIONS = [
@@ -35,23 +35,22 @@ interface AddTestDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   pageId: number
-  onSuccess: () => void
 }
 
 export function AddTestDialog({
   open,
   onOpenChange,
   pageId,
-  onSuccess,
 }: AddTestDialogProps) {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [viewport, setViewport] = useState('desktop')
   const [runOnViewports, setRunOnViewports] = useState<string[]>([]) // empty = all
   const [useActions, setUseActions] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [sessionId, setSessionId] = useState<number | null>(null)
   const [isComplete, setIsComplete] = useState(false)
+  
+  const createTest = useCreateTest()
 
   const toggleViewport = (vp: string) => {
     setRunOnViewports(prev => 
@@ -63,30 +62,34 @@ export function AddTestDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsLoading(true)
 
-    try {
-      const test = await api.createTest(pageId, { 
-        name, 
-        prompt, 
-        viewport,
-        viewports: runOnViewports.length > 0 ? runOnViewports : undefined,
-        useActions
-      })
-      
-      if (test.sessionId) {
-        // Show the chat panel for live updates
-        setSessionId(test.sessionId)
-      } else {
-        // Fallback for when no session is created (shouldn't happen normally)
-        toast.success('Test created')
-        handleClose()
-        onSuccess()
+    createTest.mutate(
+      { 
+        pageId, 
+        data: { 
+          name, 
+          prompt, 
+          viewport,
+          viewports: runOnViewports.length > 0 ? runOnViewports : undefined,
+          useActions
+        }
+      },
+      {
+        onSuccess: (test) => {
+          if (test.sessionId) {
+            // Show the chat panel for live updates
+            setSessionId(test.sessionId)
+          } else {
+            // Fallback for when no session is created (shouldn't happen normally)
+            toast.success('Test created')
+            handleClose()
+          }
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to create test')
+        },
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create test')
-      setIsLoading(false)
-    }
+    )
   }
 
   const handleGenerationComplete = () => {
@@ -100,7 +103,6 @@ export function AddTestDialog({
     setViewport('desktop')
     setRunOnViewports([])
     setUseActions(false)
-    setIsLoading(false)
     setSessionId(null)
     setIsComplete(false)
     onOpenChange(false)
@@ -109,7 +111,6 @@ export function AddTestDialog({
   const handleFinish = () => {
     toast.success('Test created with AI-generated script')
     handleClose()
-    onSuccess()
   }
 
   // Show chat panel when generating
@@ -169,7 +170,7 @@ export function AddTestDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={createTest.isPending}
               />
             </div>
             <div className="space-y-2">
@@ -181,7 +182,7 @@ export function AddTestDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={4}
                 required
-                disabled={isLoading}
+                disabled={createTest.isPending}
               />
               <p className="text-xs text-muted-foreground">
                 Describe the test in plain English. AI will analyze the page and generate the test script with assertions.
@@ -189,7 +190,7 @@ export function AddTestDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="test-viewport">Viewport for analysis</Label>
-              <Select value={viewport} onValueChange={setViewport} disabled={isLoading}>
+              <Select value={viewport} onValueChange={setViewport} disabled={createTest.isPending}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -214,7 +215,7 @@ export function AddTestDialog({
                     <Checkbox
                       checked={runOnViewports.length === 0 || runOnViewports.includes(vp.value)}
                       onCheckedChange={() => toggleViewport(vp.value)}
-                      disabled={isLoading}
+                      disabled={createTest.isPending}
                     />
                     <span className="material-symbols-outlined text-sm">{vp.icon}</span>
                     <span className="text-sm">{vp.label}</span>
@@ -239,16 +240,16 @@ export function AddTestDialog({
                 id="use-actions"
                 checked={useActions}
                 onCheckedChange={setUseActions}
-                disabled={isLoading}
+                disabled={createTest.isPending}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={createTest.isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? (
+            <Button type="submit" disabled={createTest.isPending}>
+              {createTest.isPending ? (
                 <>
                   <Icon name="progress_activity" className="animate-spin" size="sm" />
                   Starting...

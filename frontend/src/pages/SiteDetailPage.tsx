@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { api, Site, Page, CaptureJob } from '@/lib/api'
+import { useQueryClient } from '@tanstack/react-query'
+import { api, CaptureJob } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
 import { PageCard, PageCardSkeleton } from '@/components/pages/PageCard'
@@ -9,20 +10,33 @@ import { DeleteSiteDialog } from '@/components/sites/DeleteSiteDialog'
 import { DeletePagesDialog } from '@/components/pages/DeletePagesDialog'
 import { DiscoverPagesDialog } from '@/components/sites/DiscoverPagesDialog'
 import { EditSiteDialog } from '@/components/sites/EditSiteDialog'
-import { usePolling } from '@/hooks/usePolling'
+import { useSite, usePages } from '@/hooks/useQueries'
+import { queryKeys } from '@/lib/queryClient'
 import { toast } from 'sonner'
 
 export function SiteDetailPage() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
-  const [site, setSite] = useState<Site | null>(null)
-  const [pages, setPages] = useState<Page[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const parsedSiteId = siteId ? parseInt(siteId, 10) : undefined
+
+  // TanStack Query for data fetching
+  const { data: site, isLoading: siteLoading, error: siteError } = useSite(parsedSiteId)
+  const { data: pages = [], isLoading: pagesLoading } = usePages(parsedSiteId)
+  const isLoading = siteLoading || pagesLoading
+
+  // Show error toast on initial load error
+  useEffect(() => {
+    if (siteError) {
+      toast.error(siteError instanceof Error ? siteError.message : 'Failed to load site')
+    }
+  }, [siteError])
+
+  // Dialog states
   const [addPageDialogOpen, setAddPageDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [discoverDialogOpen, setDiscoverDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const initialLoadDone = useRef(false)
 
   // Select mode for batch delete
   const [selectMode, setSelectMode] = useState(false)
@@ -39,27 +53,6 @@ export function SiteDetailPage() {
   useEffect(() => {
     captureJobsRef.current = captureJobs
   }, [captureJobs])
-
-  const loadData = useCallback(async () => {
-    if (!siteId) return
-
-    try {
-      const [siteData, pagesData] = await Promise.all([
-        api.getSite(parseInt(siteId, 10)),
-        api.getPages(parseInt(siteId, 10)),
-      ])
-      setSite(siteData)
-      setPages(pagesData)
-    } catch (error) {
-      // Only show error on initial load, not during polling
-      if (!initialLoadDone.current) {
-        toast.error(error instanceof Error ? error.message : 'Failed to load site')
-      }
-    } finally {
-      setIsLoading(false)
-      initialLoadDone.current = true
-    }
-  }, [siteId])
 
   // Poll capture status for pages with active jobs
   const pollCaptureStatus = useCallback(async () => {
@@ -109,11 +102,12 @@ export function SiteDetailPage() {
       return next
     })
     
-    // Reload page data if any jobs completed
-    if (completedJobs.length > 0) {
-      loadData()
+    // Invalidate queries if any jobs completed
+    if (completedJobs.length > 0 && parsedSiteId) {
+      queryClient.invalidateQueries({ queryKey: queryKeys.pages.list(parsedSiteId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.sites.detail(parsedSiteId) })
     }
-  }, [loadData])
+  }, [parsedSiteId, queryClient])
 
   // Derived state: whether there are active capture jobs
   const hasActiveJobs = Array.from(captureJobs.values()).some(
@@ -170,16 +164,11 @@ export function SiteDetailPage() {
     loadCaptureStatuses()
   }, [pages])
 
+  // Reset capture status tracking when siteId changes
   useEffect(() => {
-    initialLoadDone.current = false
     captureStatusLoadedRef.current = false
     setCaptureJobs(new Map())
-    setIsLoading(true)
-    loadData()
-  }, [siteId]) // Only reload when siteId changes
-
-  // Poll for updates every 30 seconds
-  usePolling(loadData, { enabled: !!siteId })
+  }, [siteId])
 
   // Selection handlers
   const handleSelect = (id: number) => {
@@ -357,7 +346,6 @@ export function SiteDetailPage() {
         open={addPageDialogOpen}
         onOpenChange={setAddPageDialogOpen}
         siteId={site.id}
-        onSuccess={loadData}
       />
 
       <DeleteSiteDialog
@@ -370,16 +358,12 @@ export function SiteDetailPage() {
         open={discoverDialogOpen}
         onOpenChange={setDiscoverDialogOpen}
         site={site}
-        onSuccess={loadData}
       />
 
       <EditSiteDialog
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         site={site}
-        onSuccess={(updatedSite) => {
-          setSite(updatedSite)
-        }}
       />
 
       <DeletePagesDialog
@@ -389,7 +373,6 @@ export function SiteDetailPage() {
         onSuccess={() => {
           setSelectMode(false)
           setSelectedIds(new Set())
-          loadData()
         }}
       />
     </div>

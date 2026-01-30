@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Dialog,
@@ -10,7 +9,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { api, Page } from '@/lib/api'
+import { Page } from '@/lib/api'
+import { useDeletePage } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DeletePageDialogProps {
@@ -21,22 +21,20 @@ interface DeletePageDialogProps {
 }
 
 export function DeletePageDialog({ open, onOpenChange, page, siteId }: DeletePageDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
   const navigate = useNavigate()
+  const deletePage = useDeletePage()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      await api.deletePage(page.id)
-      toast.success('Page deleted successfully')
-      onOpenChange(false)
-      navigate(`/sites/${siteId}`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete page')
-    } finally {
-      setIsLoading(false)
-    }
+    deletePage.mutate(page.id, {
+      onSuccess: () => {
+        toast.success('Page deleted successfully')
+        onOpenChange(false)
+        navigate(`/sites/${siteId}`)
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to delete page')
+      },
+    })
   }
 
   return (
@@ -53,11 +51,11 @@ export function DeletePageDialog({ open, onOpenChange, page, siteId }: DeletePag
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deletePage.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deletePage.isPending}>
+            {deletePage.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...

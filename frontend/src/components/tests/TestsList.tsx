@@ -1,25 +1,27 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { Test, api } from '@/lib/api'
+import { Test } from '@/lib/api'
 import { TestCard } from './TestCard'
 import { AddTestDialog } from './AddTestDialog'
 import { EditTestDialog } from './EditTestDialog'
 import { DeleteTestDialog } from './DeleteTestDialog'
+import { useReorderTests } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface TestsListProps {
   pageId: number
   tests: Test[]
-  onUpdate: () => void
 }
 
-export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
+export function TestsList({ pageId, tests }: TestsListProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [editTest, setEditTest] = useState<Test | null>(null)
   const [deleteTest, setDeleteTest] = useState<Test | null>(null)
+  
+  const reorderTests = useReorderTests()
 
-  const handleMove = useCallback(async (testId: number, direction: 'up' | 'down') => {
+  const handleMove = (testId: number, direction: 'up' | 'down') => {
     const index = tests.findIndex(t => t.id === testId)
     if (index === -1) return
 
@@ -29,13 +31,15 @@ export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
     const testIds = tests.map(t => t.id)
     ;[testIds[index], testIds[newIndex]] = [testIds[newIndex], testIds[index]]
 
-    try {
-      await api.reorderTests(pageId, testIds)
-      onUpdate()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to reorder tests')
-    }
-  }, [pageId, tests, onUpdate])
+    reorderTests.mutate(
+      { pageId, testIds },
+      {
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to reorder tests')
+        },
+      }
+    )
+  }
 
   return (
     <div className="mb-8">
@@ -64,7 +68,6 @@ export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
               index={index}
               totalCount={tests.length}
               pageId={pageId}
-              onUpdate={onUpdate}
               onEdit={() => setEditTest(test)}
               onDelete={() => setDeleteTest(test)}
               onMove={(dir) => handleMove(test.id, dir)}
@@ -78,7 +81,6 @@ export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
         open={addDialogOpen}
         onOpenChange={setAddDialogOpen}
         pageId={pageId}
-        onSuccess={onUpdate}
       />
 
       {editTest && (
@@ -87,7 +89,6 @@ export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
           onOpenChange={(open) => !open && setEditTest(null)}
           test={editTest}
           pageId={pageId}
-          onSuccess={onUpdate}
         />
       )}
 
@@ -97,7 +98,6 @@ export function TestsList({ pageId, tests, onUpdate }: TestsListProps) {
           onOpenChange={(open) => !open && setDeleteTest(null)}
           test={deleteTest}
           pageId={pageId}
-          onSuccess={onUpdate}
         />
       )}
     </div>

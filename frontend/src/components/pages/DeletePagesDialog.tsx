@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -9,7 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { api, Page } from '@/lib/api'
+import { Page } from '@/lib/api'
+import { useDeletePages } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DeletePagesDialogProps {
@@ -25,22 +25,21 @@ export function DeletePagesDialog({
   pages,
   onSuccess,
 }: DeletePagesDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+  const deletePages = useDeletePages()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      const ids = pages.map(p => p.id)
-      const result = await api.deletePages(ids)
-      toast.success(`Deleted ${result.deletedCount} page${result.deletedCount !== 1 ? 's' : ''}`)
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete pages')
-    } finally {
-      setIsLoading(false)
-    }
+    const ids = pages.map(p => p.id)
+    
+    deletePages.mutate(ids, {
+      onSuccess: (result) => {
+        toast.success(`Deleted ${result.deletedCount} page${result.deletedCount !== 1 ? 's' : ''}`)
+        onOpenChange(false)
+        onSuccess()
+      },
+      onError: (error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to delete pages')
+      },
+    })
   }
 
   const count = pages.length
@@ -60,11 +59,11 @@ export function DeletePagesDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deletePages.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deletePages.isPending}>
+            {deletePages.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...

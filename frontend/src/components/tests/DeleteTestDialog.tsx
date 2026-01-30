@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -9,7 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Icon } from '@/components/ui/icon'
-import { api, Test } from '@/lib/api'
+import { Test } from '@/lib/api'
+import { useDeleteTest } from '@/hooks/useQueries'
 import { toast } from 'sonner'
 
 interface DeleteTestDialogProps {
@@ -17,7 +17,6 @@ interface DeleteTestDialogProps {
   onOpenChange: (open: boolean) => void
   test: Test
   pageId: number
-  onSuccess: () => void
 }
 
 export function DeleteTestDialog({
@@ -25,23 +24,22 @@ export function DeleteTestDialog({
   onOpenChange,
   test,
   pageId,
-  onSuccess,
 }: DeleteTestDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+  const deleteTest = useDeleteTest()
 
   const handleDelete = async () => {
-    setIsLoading(true)
-
-    try {
-      await api.deleteTest(pageId, test.id)
-      toast.success('Test deleted')
-      onOpenChange(false)
-      onSuccess()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete test')
-    } finally {
-      setIsLoading(false)
-    }
+    deleteTest.mutate(
+      { pageId, testId: test.id },
+      {
+        onSuccess: () => {
+          toast.success('Test deleted')
+          onOpenChange(false)
+        },
+        onError: (error) => {
+          toast.error(error instanceof Error ? error.message : 'Failed to delete test')
+        },
+      }
+    )
   }
 
   return (
@@ -54,11 +52,11 @@ export function DeleteTestDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={deleteTest.isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={isLoading}>
-            {isLoading ? (
+          <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleteTest.isPending}>
+            {deleteTest.isPending ? (
               <>
                 <Icon name="progress_activity" className="animate-spin" size="sm" />
                 Deleting...
