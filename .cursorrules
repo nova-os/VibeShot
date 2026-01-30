@@ -83,11 +83,29 @@ users (1) ──< sites (1) ──< pages (1) ──< screenshots
 
 ### Important Fields
 
-- `pages.interval_minutes` - How often to capture (default: 360 = 6 hours)
+- `pages.interval_minutes` - How often to capture (NULL = inherit from cascade)
 - `pages.last_screenshot_at` - When last captured (NULL triggers immediate capture)
 - `pages.is_active` - Enable/disable capturing
 - `screenshots.file_path` - Relative path to stored image
 - `screenshots.thumbnail_path` - Relative path to thumbnail
+
+### Settings Cascade
+
+Capture settings (interval_minutes, viewports) follow a cascade priority:
+
+```
+Page settings (if set) → Site settings (if set) → User settings (if set) → System defaults
+```
+
+System defaults are defined in constants files:
+- `worker/src/config/constants.js`
+- `api/src/config/constants.js`
+- `frontend/src/lib/constants.ts`
+
+| Setting | System Default |
+|---------|----------------|
+| `interval_minutes` | 1440 (24 hours) |
+| `viewports` | [1920, 768, 375] |
 
 ## Key Mechanics
 

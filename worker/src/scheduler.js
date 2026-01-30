@@ -1,24 +1,31 @@
 const db = require('./config/database');
+const { 
+  DEFAULT_INTERVAL_MINUTES, 
+  DEFAULT_VIEWPORTS, 
+  RETRY_SETTINGS 
+} = require('./config/constants');
 const { captureScreenshotsWithProgress } = require('./screenshot');
 const { runCleanup } = require('./cleanup');
 
 const POLL_INTERVAL = 10000; // 10 seconds
 const CLEANUP_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
 
-// Retry settings for failed captures
-const BASE_RETRY_DELAY_MINUTES = 5; // Initial retry delay after first failure
-const MAX_CONSECUTIVE_FAILURES = 5; // Stop retrying after this many consecutive failures
-const STALE_JOB_TIMEOUT_MINUTES = 10; // Consider "capturing" jobs stale after this long
+// Destructure retry settings
+const { 
+  BASE_RETRY_DELAY_MINUTES, 
+  MAX_CONSECUTIVE_FAILURES, 
+  STALE_JOB_TIMEOUT_MINUTES 
+} = RETRY_SETTINGS;
 
-// Default settings (fallback when no user settings exist)
-const DEFAULT_INTERVAL_MINUTES = 1440; // 24 hours
-const DEFAULT_VIEWPORTS = '[1920, 768, 375]';
+// Default viewports as JSON string for SQL queries
+const DEFAULT_VIEWPORTS_JSON = JSON.stringify(DEFAULT_VIEWPORTS);
 
 class Scheduler {
   constructor(browserPool) {
     this.browserPool = browserPool;
     this.isRunning = false;
     this.intervalId = null;
+    this.firstCleanupInterval = null;
     this.cleanupIntervalId = null;
     this.activeJobs = new Set();
     this.isCleanupRunning = false;
@@ -38,7 +45,7 @@ class Scheduler {
     this.intervalId = setInterval(() => this.checkAndCapture(), POLL_INTERVAL);
     
     // Run cleanup after a short delay, then every 6 hours
-    setTimeout(() => this.runCleanupJob(), 60000); // Wait 1 minute before first cleanup
+    this.firstCleanupInterval = setTimeout(() => this.runCleanupJob(), 60000); // Wait 1 minute before first cleanup
     this.cleanupIntervalId = setInterval(() => this.runCleanupJob(), CLEANUP_INTERVAL);
   }
 
@@ -49,6 +56,10 @@ class Scheduler {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+    if (this.firstCleanupInterval) {
+      clearTimeout(this.firstCleanupInterval);
+      this.firstCleanupInterval = null;
     }
     if (this.cleanupIntervalId) {
       clearInterval(this.cleanupIntervalId);
@@ -167,7 +178,7 @@ class Scheduler {
           )
         )
       ORDER BY pending_job.id DESC, p.last_screenshot_at ASC
-    `, [DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS, DEFAULT_INTERVAL_MINUTES, MAX_CONSECUTIVE_FAILURES, BASE_RETRY_DELAY_MINUTES]);
+    `, [DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS_JSON, DEFAULT_INTERVAL_MINUTES, MAX_CONSECUTIVE_FAILURES, BASE_RETRY_DELAY_MINUTES]);
     
     // Filter out pages already being processed and pages that exceeded max retries
     const filteredPages = pages.filter(page => {
@@ -206,9 +217,11 @@ class Scheduler {
       page.tests = tests;
       
       // Parse viewports JSON if it's a string
-      if (typeof page.effective_viewports === 'string') {
-        page.effective_viewports = JSON.parse(page.effective_viewports);
+      if (typeof page.effective_viewports !== 'string') {
+        console.error(`Scheduler: Effective viewports for page ${page.id} is not a string:`, page.effective_viewports);
+        continue;
       }
+      page.effective_viewports = JSON.parse(page.effective_viewports);
     }
     
     return filteredPages;
@@ -220,7 +233,7 @@ class Scheduler {
     
     // Get or create capture job
     let jobId = page.pending_job_id;
-    const viewportsTotal = (page.effective_viewports || [1920, 768, 375]).length;
+    const viewportsTotal = page.effective_viewports.length;
     const isRetry = page.latest_job_status === 'failed' && page.consecutive_failures > 0;
 
     try {

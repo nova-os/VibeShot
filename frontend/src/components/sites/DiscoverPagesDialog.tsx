@@ -98,7 +98,6 @@ export function DiscoverPagesDialog({
         .map((p) => ({
           url: p.url,
           name: p.title,
-          interval_minutes: 360,
         }))
 
       const result = await api.bulkCreatePages(site.id, pagesToAdd)

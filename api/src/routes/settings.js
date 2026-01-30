@@ -1,26 +1,16 @@
 const express = require('express');
 const db = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const { 
+  DEFAULT_INTERVAL_MINUTES, 
+  DEFAULT_VIEWPORTS, 
+  DEFAULT_RETENTION 
+} = require('../config/constants');
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
-
-// Default settings values
-const DEFAULT_INTERVAL_MINUTES = 1440; // 24 hours
-const DEFAULT_VIEWPORTS = [1920, 768, 375];
-
-// Default retention settings
-const DEFAULT_RETENTION = {
-  retention_enabled: false,
-  max_screenshots_per_page: null,
-  keep_per_day: 4,
-  keep_per_week: 2,
-  keep_per_month: 1,
-  keep_per_year: 1,
-  max_age_days: null
-};
 
 // Get user settings (creates defaults if not exists)
 router.get('/', async (req, res) => {

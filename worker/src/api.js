@@ -249,7 +249,7 @@ class WorkerApi {
         // Prepare page with viewport, navigation, and cookie consent handling
         // Uses same setup as screenshot capture for consistent page state
         await preparePage(page, pageUrl, { 
-          viewport: viewport || 'desktop', 
+          viewport, 
           timeout: 60000,
           logPrefix: 'WorkerAPI[test-script]'
         });

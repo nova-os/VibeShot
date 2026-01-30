@@ -18,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { api, Page, UserSettings } from '@/lib/api'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
 import { toast } from 'sonner'
+import { DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS } from '@/lib/constants'
 
 interface EditPageDialogProps {
   open: boolean
@@ -25,10 +26,6 @@ interface EditPageDialogProps {
   page: Page
   onSuccess: () => void
 }
-
-// Default settings fallback
-const DEFAULT_INTERVAL = 1440
-const DEFAULT_VIEWPORTS = [1920, 768, 375]
 
 export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPageDialogProps) {
   const [name, setName] = useState(page.name)
@@ -38,7 +35,7 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
   
   // Custom settings state
   const [useCustomSettings, setUseCustomSettings] = useState(false)
-  const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL)
+  const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL_MINUTES)
   const [viewports, setViewports] = useState<number[]>(DEFAULT_VIEWPORTS)
   
   // User settings for defaults display
@@ -66,11 +63,11 @@ export function EditPageDialog({ open, onOpenChange, page, onSuccess }: EditPage
     setUseCustomSettings(hasCustom)
     
     if (hasCustom) {
-      setIntervalMinutes(page.interval_minutes ?? DEFAULT_INTERVAL)
+      setIntervalMinutes(page.interval_minutes ?? DEFAULT_INTERVAL_MINUTES)
       setViewports(page.viewports ?? DEFAULT_VIEWPORTS)
     } else {
       // Will be set from user settings
-      setIntervalMinutes(DEFAULT_INTERVAL)
+      setIntervalMinutes(DEFAULT_INTERVAL_MINUTES)
       setViewports(DEFAULT_VIEWPORTS)
     }
   }, [page])

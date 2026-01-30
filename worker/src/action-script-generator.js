@@ -22,7 +22,7 @@ class ActionScriptGenerator {
    * @returns {object} Generated script and metadata including scriptType
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop', sessionId = null } = options;
+    const { viewport, sessionId = null } = options;
     
     console.log(`ActionScriptGenerator: Generating script for ${pageUrl}`);
     console.log(`ActionScriptGenerator: Prompt: "${prompt}"`);

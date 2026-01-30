@@ -9,12 +9,10 @@ const {
   dismissCookieConsent, 
   autoScroll 
 } = require('./browser-helpers');
+const { DEFAULT_VIEWPORTS } = require('./config/constants');
 
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/app/screenshots';
 const THUMBNAIL_WIDTH = 400;
-
-// Default viewports (fallback when no user settings exist)
-const DEFAULT_VIEWPORTS = [1920, 768, 375];
 
 /**
  * Get viewport category name based on width

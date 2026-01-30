@@ -22,7 +22,7 @@ class ActionTestGenerator {
    * @returns {object} Generated test script and metadata including scriptType
    */
   async generate(pageUrl, prompt, options = {}) {
-    const { viewport = 'desktop', sessionId = null } = options;
+    const { viewport, sessionId = null } = options;
     
     console.log(`ActionTestGenerator: Generating test for ${pageUrl}`);
     console.log(`ActionTestGenerator: Prompt: "${prompt}"`);

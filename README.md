@@ -104,9 +104,6 @@ The seed script creates a test site (heise.de) with two pages for testing.
 | `MARIADB_PASSWORD` | Database password | - |
 | `JWT_SECRET` | Secret for JWT tokens | - |
 | `BROWSER_POOL_SIZE` | Number of parallel browsers | 4 |
-| `VIEWPORT_MOBILE` | Mobile viewport width | 375 |
-| `VIEWPORT_TABLET` | Tablet viewport width | 768 |
-| `VIEWPORT_DESKTOP` | Desktop viewport width | 1920 |
 
 ### Screenshot Intervals
 

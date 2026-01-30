@@ -15,6 +15,7 @@ import { Icon } from '@/components/ui/icon'
 import { CaptureSettingsForm } from '@/components/settings/CaptureSettingsForm'
 import { api, Site, UserSettings } from '@/lib/api'
 import { toast } from 'sonner'
+import { DEFAULT_INTERVAL_MINUTES, DEFAULT_VIEWPORTS } from '@/lib/constants'
 
 interface EditSiteDialogProps {
   open: boolean
@@ -27,8 +28,8 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
   const [name, setName] = useState(site.name)
   const [domain, setDomain] = useState(site.domain)
   const [useCustomSettings, setUseCustomSettings] = useState(false)
-  const [intervalMinutes, setIntervalMinutes] = useState(1440)
-  const [viewports, setViewports] = useState<number[]>([1920, 768, 375])
+  const [intervalMinutes, setIntervalMinutes] = useState(DEFAULT_INTERVAL_MINUTES)
+  const [viewports, setViewports] = useState<number[]>(DEFAULT_VIEWPORTS)
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingSettings, setIsLoadingSettings] = useState(true)
@@ -69,8 +70,8 @@ export function EditSiteDialog({ open, onOpenChange, site, onSuccess }: EditSite
     } catch (error) {
       console.error('Failed to load user settings:', error)
       // Use system defaults if we can't load user settings
-      setIntervalMinutes(site.interval_minutes ?? 1440)
-      setViewports(site.viewports ?? [1920, 768, 375])
+      setIntervalMinutes(site.interval_minutes ?? DEFAULT_INTERVAL_MINUTES)
+      setViewports(site.viewports ?? DEFAULT_VIEWPORTS)
     } finally {
       setIsLoadingSettings(false)
     }

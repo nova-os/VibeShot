@@ -7,14 +7,7 @@
  * - Test generation (worker/src/test-generator.js, action-test-generator.js)
  */
 
-/**
- * Standard viewport configurations
- */
-const VIEWPORT_SIZES = {
-  mobile: { width: 375, height: 812 },
-  tablet: { width: 768, height: 1024 },
-  desktop: { width: 1920, height: 1080 }
-};
+const { VIEWPORT_SIZES } = require('./config/constants');
 
 /**
  * Simple sleep utility
@@ -414,7 +407,7 @@ async function dismissCookieConsent(page) {
  */
 async function preparePage(page, url, options = {}) {
   const { 
-    viewport = 'desktop',
+    viewport,
     timeout = 60000,
     dismissCookies = true,
     logPrefix = 'BrowserHelpers'
